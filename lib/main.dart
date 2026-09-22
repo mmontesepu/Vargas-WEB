@@ -1,14 +1,12 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'app/theme/app_theme.dart';
+import 'features/quotes/models/quote.dart';
+import 'features/quotes/models/quote_item.dart';
+import 'features/quotes/services/quote_pdf_service.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
 
-const gold = Color(0xFFD5A253);
-const ink = Color(0xFF101214);
-const panel = Color(0xFF1B1D1F);
 String money(num value) =>
     '\$${value.round().toString().replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => '.')}';
 
@@ -16,24 +14,12 @@ void main() => runApp(const VargasApp());
 
 class VargasApp extends StatelessWidget {
   const VargasApp({super.key});
+
   @override
   Widget build(BuildContext context) => MaterialApp(
         title: 'Vargas SPA Construcciones',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData.dark(useMaterial3: true).copyWith(
-          scaffoldBackgroundColor: ink,
-          colorScheme: const ColorScheme.dark(primary: gold, surface: panel),
-          inputDecorationTheme: InputDecorationTheme(
-              border:
-                  OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-              contentPadding: const EdgeInsets.all(14)),
-          filledButtonTheme: FilledButtonThemeData(
-              style: FilledButton.styleFrom(
-                  backgroundColor: gold,
-                  foregroundColor: ink,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 22, vertical: 18))),
-        ),
+        theme: AppTheme.darkTheme,
         home: const HomePage(),
       );
 }
@@ -154,58 +140,6 @@ class HomePage extends StatelessWidget {
                     onPressed: () => Navigator.pop(context),
                     child: const Text('Cerrar'))
               ]));
-}
-
-class QuoteItem {
-  String description, unit;
-  double quantity, price;
-  QuoteItem(this.description, this.unit, this.quantity, this.price);
-  double get total => quantity * price;
-  Map<String, dynamic> toJson() => {
-        'description': description,
-        'unit': unit,
-        'quantity': quantity,
-        'price': price
-      };
-  factory QuoteItem.fromJson(Map<String, dynamic> j) => QuoteItem(
-      j['description'] ?? '',
-      j['unit'] ?? 'GL',
-      (j['quantity'] as num).toDouble(),
-      (j['price'] as num).toDouble());
-}
-
-class Quote {
-  String id, client, email, address, notes, payment, status;
-  DateTime date;
-  List<QuoteItem> items;
-  Quote(this.id, this.client, this.email, this.address, this.notes,
-      this.payment, this.status, this.date, this.items);
-  double get net => items.fold(0, (sum, item) => sum + item.total);
-  double get vat => (net * .19).roundToDouble();
-  double get total => net + vat;
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'client': client,
-        'email': email,
-        'address': address,
-        'notes': notes,
-        'payment': payment,
-        'status': status,
-        'date': date.toIso8601String(),
-        'items': items.map((e) => e.toJson()).toList()
-      };
-  factory Quote.fromJson(Map<String, dynamic> j) => Quote(
-      j['id'],
-      j['client'],
-      j['email'] ?? '',
-      j['address'] ?? '',
-      j['notes'] ?? '',
-      j['payment'] ?? '',
-      j['status'] ?? 'Borrador',
-      DateTime.parse(j['date']),
-      (j['items'] as List)
-          .map((e) => QuoteItem.fromJson(Map<String, dynamic>.from(e)))
-          .toList());
 }
 
 class AdminPage extends StatefulWidget {
@@ -358,8 +292,9 @@ class _AdminPageState extends State<AdminPage> {
                                                           IconButton(
                                                               tooltip: 'PDF',
                                                               onPressed: () =>
-                                                                  generatePdf(
-                                                                      q),
+                                                                  QuotePdfService
+                                                                      .generate(
+                                                                          q),
                                                               icon: const Icon(Icons
                                                                   .picture_as_pdf)),
                                                           IconButton(
@@ -618,90 +553,4 @@ class _QuoteEditorState extends State<QuoteEditor> {
                       const SizedBox(height: 35),
                     ])))));
   }
-}
-
-Future<void> generatePdf(Quote q) async {
-  final doc = pw.Document();
-  final logo = await rootBundle.load('assets/images/logo.png');
-  doc.addPage(pw.MultiPage(
-      pageFormat: PdfPageFormat.a4,
-      margin: const pw.EdgeInsets.all(42),
-      build: (_) => [
-            pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Image(pw.MemoryImage(logo.buffer.asUint8List()),
-                      width: 100, height: 100),
-                  pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.end,
-                      children: [
-                        pw.Text('COTIZACIÓN',
-                            style: pw.TextStyle(
-                                fontSize: 24, fontWeight: pw.FontWeight.bold)),
-                        pw.Text(q.id),
-                        pw.Text('${q.date.day}/${q.date.month}/${q.date.year}')
-                      ])
-                ]),
-            pw.SizedBox(height: 28),
-            pw.Text('CLIENTE',
-                style: pw.TextStyle(
-                    color: PdfColor.fromHex('#A87937'),
-                    fontWeight: pw.FontWeight.bold)),
-            pw.Text(q.client),
-            if (q.email.isNotEmpty) pw.Text(q.email),
-            if (q.address.isNotEmpty) pw.Text(q.address),
-            pw.SizedBox(height: 28),
-            pw.TableHelper.fromTextArray(
-                headers: [
-                  'Descripción',
-                  'Unidad',
-                  'Cant.',
-                  'P. unitario',
-                  'Total'
-                ],
-                data: q.items
-                    .map((e) => [
-                          e.description,
-                          e.unit,
-                          e.quantity.toString(),
-                          money(e.price),
-                          money(e.total)
-                        ])
-                    .toList(),
-                headerDecoration:
-                    pw.BoxDecoration(color: PdfColor.fromHex('#242424')),
-                headerStyle: pw.TextStyle(
-                    color: PdfColors.white, fontWeight: pw.FontWeight.bold),
-                cellPadding: const pw.EdgeInsets.all(9),
-                cellStyle: const pw.TextStyle(fontSize: 9)),
-            pw.SizedBox(height: 20),
-            pw.Align(
-                alignment: pw.Alignment.centerRight,
-                child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.end,
-                    children: [
-                      pw.Text('Neto: ${money(q.net)}'),
-                      pw.Text('IVA 19%: ${money(q.vat)}'),
-                      pw.SizedBox(height: 8),
-                      pw.Text('TOTAL: ${money(q.total)}',
-                          style: pw.TextStyle(
-                              fontSize: 18,
-                              fontWeight: pw.FontWeight.bold,
-                              color: PdfColor.fromHex('#A87937')))
-                    ])),
-            if (q.payment.isNotEmpty) ...[
-              pw.SizedBox(height: 32),
-              pw.Text('FORMA DE PAGO',
-                  style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-              pw.Text(q.payment)
-            ],
-            if (q.notes.isNotEmpty) ...[
-              pw.SizedBox(height: 15),
-              pw.Text('OBSERVACIONES',
-                  style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-              pw.Text(q.notes)
-            ],
-          ]));
-  await Printing.layoutPdf(
-      onLayout: (_) async => doc.save(), name: '${q.id}.pdf');
 }
