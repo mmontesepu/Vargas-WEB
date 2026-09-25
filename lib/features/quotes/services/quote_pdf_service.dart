@@ -15,7 +15,6 @@ class QuotePdfService {
 
   static Future<void> generate(Quote q) async {
     final doc = pw.Document();
-
     final logo = await rootBundle.load('assets/images/logo.png');
 
     doc.addPage(
@@ -42,9 +41,7 @@ class QuotePdfService {
                     ),
                   ),
                   pw.Text(q.id),
-                  pw.Text(
-                    '${q.date.day}/${q.date.month}/${q.date.year}',
-                  ),
+                  pw.Text('${q.date.day}/${q.date.month}/${q.date.year}'),
                 ],
               ),
             ],
@@ -59,7 +56,21 @@ class QuotePdfService {
           ),
           pw.Text(q.client),
           if (q.email.isNotEmpty) pw.Text(q.email),
-          if (q.address.isNotEmpty) pw.Text(q.address),
+          if (q.projectName.trim().isNotEmpty) ...[
+            pw.SizedBox(height: 14),
+            pw.Text(
+              'PROYECTO / OBRA',
+              style: pw.TextStyle(
+                color: PdfColor.fromHex('#A87937'),
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.Text(q.projectName),
+          ],
+          if (q.address.isNotEmpty) ...[
+            pw.SizedBox(height: 8),
+            pw.Text('Dirección de obra: ${q.address}'),
+          ],
           pw.SizedBox(height: 28),
           pw.TableHelper.fromTextArray(
             headers: const [
@@ -70,15 +81,13 @@ class QuotePdfService {
               'Total',
             ],
             data: q.items
-                .map(
-                  (item) => [
-                    item.description,
-                    item.unit,
-                    item.quantity.toString(),
-                    _money(item.price),
-                    _money(item.total),
-                  ],
-                )
+                .map((item) => [
+                      item.description,
+                      item.unit,
+                      item.quantity.toString(),
+                      _money(item.price),
+                      _money(item.total),
+                    ])
                 .toList(),
             headerDecoration: pw.BoxDecoration(
               color: PdfColor.fromHex('#242424'),
@@ -114,9 +123,7 @@ class QuotePdfService {
             pw.SizedBox(height: 32),
             pw.Text(
               'FORMA DE PAGO',
-              style: pw.TextStyle(
-                fontWeight: pw.FontWeight.bold,
-              ),
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
             ),
             pw.Text(q.payment),
           ],
@@ -124,9 +131,7 @@ class QuotePdfService {
             pw.SizedBox(height: 15),
             pw.Text(
               'OBSERVACIONES',
-              style: pw.TextStyle(
-                fontWeight: pw.FontWeight.bold,
-              ),
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
             ),
             pw.Text(q.notes),
           ],
