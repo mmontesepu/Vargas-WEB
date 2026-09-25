@@ -13,6 +13,7 @@ import '../../clients/repositories/client_repository.dart';
 import '../../projects/presentation/projects_page.dart';
 import '../../projects/models/project.dart';
 import '../../projects/repositories/project_repository.dart';
+import '../../web_content/presentation/web_projects_page.dart';
 
 class AdminPage extends StatefulWidget {
   const AdminPage({super.key});
@@ -159,6 +160,12 @@ class _AdminPageState extends State<AdminPage> {
               icon: Icons.apartment_outlined,
               selectedIcon: Icons.apartment,
               label: 'Obras / Proyectos',
+            ),
+            _menuItem(
+              index: 4,
+              icon: Icons.web_outlined,
+              selectedIcon: Icons.web,
+              label: 'Contenido web',
             ),
             const Spacer(),
             const Divider(height: 1),
@@ -319,6 +326,9 @@ class _AdminPageState extends State<AdminPage> {
       case 3:
         return 'Obras / Proyectos';
 
+      case 4:
+        return 'Contenido web';
+
       default:
         return 'Dashboard';
     }
@@ -338,6 +348,9 @@ class _AdminPageState extends State<AdminPage> {
 
       case 3:
         return const ProjectsPage();
+
+      case 4:
+        return const WebProjectsPage();
 
       default:
         return _buildDashboard();
