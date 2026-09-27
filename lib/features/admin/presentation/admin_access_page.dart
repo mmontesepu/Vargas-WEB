@@ -4,9 +4,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../app/theme/app_theme.dart';
 import 'admin_page.dart';
 
-
-
-
 class AdminAccessPage extends StatefulWidget {
   const AdminAccessPage({super.key});
 
@@ -155,20 +152,31 @@ class _AdminAccessPageState extends State<AdminAccessPage> {
     }
 
     if (_authorized) {
+      final isMobile = MediaQuery.sizeOf(context).width < 800;
+
       return Stack(
         children: [
           const AdminPage(),
           Positioned(
-            right: 20,
-            bottom: 20,
-            child: FloatingActionButton.extended(
-              heroTag: 'adminSignOut',
-              backgroundColor: panel,
-              foregroundColor: Colors.white,
-              onPressed: _signOut,
-              icon: const Icon(Icons.logout),
-              label: const Text('Cerrar sesión'),
-            ),
+            right: isMobile ? 12 : 20,
+            bottom: isMobile ? 12 : 20,
+            child: isMobile
+                ? FloatingActionButton.small(
+                    heroTag: 'adminSignOut',
+                    backgroundColor: panel,
+                    foregroundColor: Colors.white,
+                    tooltip: 'Cerrar sesión',
+                    onPressed: _signOut,
+                    child: const Icon(Icons.logout),
+                  )
+                : FloatingActionButton.extended(
+                    heroTag: 'adminSignOut',
+                    backgroundColor: panel,
+                    foregroundColor: Colors.white,
+                    onPressed: _signOut,
+                    icon: const Icon(Icons.logout),
+                    label: const Text('Cerrar sesión'),
+                  ),
           ),
         ],
       );

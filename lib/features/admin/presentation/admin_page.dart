@@ -34,6 +34,14 @@ class AdminPage extends StatefulWidget {
 class _AdminPageState extends State<AdminPage> {
   int _selectedIndex = 0;
 
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+
+  static const double _mobileBreakpoint = 800;
+
+  bool _isMobile(BuildContext context) {
+    return MediaQuery.sizeOf(context).width < _mobileBreakpoint;
+  }
+
   bool _webMenuExpanded = true;
 
   List<Quote> _quotes = [];
@@ -80,11 +88,26 @@ class _AdminPageState extends State<AdminPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isMobile = _isMobile(context);
+
     return Scaffold(
+      key: _scaffoldKey,
       backgroundColor: ink,
+
+      // En móvil, el menú queda oculto hasta presionar el botón.
+      drawer: isMobile
+          ? Drawer(
+              width: 280,
+              backgroundColor: panel,
+              child: _buildSidebar(),
+            )
+          : null,
+
       body: Row(
         children: [
-          _buildSidebar(),
+          // En escritorio, mantenemos el menú lateral permanente.
+          if (!isMobile) _buildSidebar(),
+
           Expanded(
             child: Column(
               children: [
@@ -366,6 +389,10 @@ class _AdminPageState extends State<AdminPage> {
               _selectedIndex = index;
             });
 
+            if (_isMobile(context)) {
+              _scaffoldKey.currentState?.closeDrawer();
+            }
+
             if (index == 0) {
               await _loadDashboard();
             }
@@ -380,67 +407,78 @@ class _AdminPageState extends State<AdminPage> {
   // ============================================================
 
   Widget _buildTopBar() {
+    final isMobile = _isMobile(context);
+
     return Container(
-      height: 72,
-      padding: const EdgeInsets.symmetric(
-        horizontal: 28,
+      height: isMobile ? 64 : 72,
+      padding: EdgeInsets.symmetric(
+        horizontal: isMobile ? 12 : 28,
       ),
       decoration: BoxDecoration(
         color: ink,
         border: Border(
           bottom: BorderSide(
-            color: Colors.white.withValues(
-              alpha: 0.08,
-            ),
+            color: Colors.white.withValues(alpha: 0.08),
           ),
         ),
       ),
-      child: Row(
-        children: [
-          Text(
-            _pageTitle(),
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const Spacer(),
-          IconButton(
-            tooltip: 'Notificaciones',
-            onPressed: () {},
-            icon: const Icon(
-              Icons.notifications_none,
-            ),
-          ),
-          const SizedBox(width: 12),
-          const CircleAvatar(
-            backgroundColor: gold,
-            child: Icon(
-              Icons.person,
-              color: ink,
-            ),
-          ),
-          const SizedBox(width: 10),
-          const Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Administrador',
+      child: SafeArea(
+        bottom: false,
+        child: Row(
+          children: [
+            if (isMobile) ...[
+              IconButton(
+                tooltip: 'Abrir menú',
+                icon: const Icon(Icons.menu, color: gold),
+                onPressed: () {
+                  _scaffoldKey.currentState?.openDrawer();
+                },
+              ),
+              const SizedBox(width: 6),
+            ],
+            Expanded(
+              child: Text(
+                _pageTitle(),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontWeight: FontWeight.w600,
+                  fontSize: isMobile ? 17 : 22,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
-              Text(
-                'Vargas SPA',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: Colors.white54,
-                ),
+            ),
+            const SizedBox(width: 12),
+            const CircleAvatar(
+              radius: 17,
+              backgroundColor: gold,
+              child: Icon(
+                Icons.person,
+                color: ink,
+                size: 19,
+              ),
+            ),
+            if (!isMobile) ...[
+              const SizedBox(width: 10),
+              const Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Administrador',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  Text(
+                    'Vargas SPA',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.white54,
+                    ),
+                  ),
+                ],
               ),
             ],
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
