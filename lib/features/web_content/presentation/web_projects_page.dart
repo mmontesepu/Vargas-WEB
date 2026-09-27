@@ -104,6 +104,75 @@ class _WebProjectsPageState extends State<WebProjectsPage> {
     await _load();
   }
 
+  Future<void> _togglePublished(WebProject project) async {
+    final newStatus = !project.published;
+
+    if (newStatus) {
+      final cover = project.coverPath;
+
+      if (cover == null || cover.trim().isEmpty) {
+        _showError(
+          'Primero debes agregar fotografías '
+          'y seleccionar una portada.',
+        );
+        return;
+      }
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(
+          newStatus ? 'Publicar obra' : 'Retirar publicación',
+        ),
+        content: Text(
+          newStatus
+              ? '¿Deseas publicar "${project.title}" '
+                  'en el portafolio de Vargas SPA?'
+              : '¿Deseas retirar "${project.title}" '
+                  'de la página pública?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(
+              newStatus ? 'Publicar' : 'Retirar',
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await WebProjectRepository.setPublished(
+        project.id,
+        newStatus,
+      );
+
+      await _load();
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            newStatus
+                ? 'Obra marcada como publicada.'
+                : 'Obra retirada de publicación.',
+          ),
+        ),
+      );
+    } catch (error) {
+      _showError(error);
+    }
+  }
+
   void _showError(Object error) {
     if (!mounted) return;
 
@@ -257,6 +326,29 @@ class _WebProjectsPageState extends State<WebProjectsPage> {
                     fontSize: 12,
                   ),
                 ),
+                const SizedBox(height: 5),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 4,
+                  children: [
+                    Text(
+                      'Orden: ${project.sortOrder}',
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 12,
+                      ),
+                    ),
+                    if (project.featured)
+                      const Text(
+                        '★ Destacado',
+                        style: TextStyle(
+                          color: gold,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -264,6 +356,17 @@ class _WebProjectsPageState extends State<WebProjectsPage> {
             tooltip: 'Editar ficha',
             onPressed: () => _openEditor(project),
             icon: const Icon(Icons.edit_outlined),
+          ),
+          IconButton(
+            tooltip:
+                project.published ? 'Retirar publicación' : 'Publicar obra',
+            onPressed: () => _togglePublished(project),
+            icon: Icon(
+              project.published
+                  ? Icons.visibility_off_outlined
+                  : Icons.public_outlined,
+              color: project.published ? const Color(0xFF80E7BA) : gold,
+            ),
           ),
           IconButton(
             tooltip: 'Administrar fotografías',
@@ -300,6 +403,8 @@ class _ProjectEditorDialogState extends State<_ProjectEditorDialog> {
   late final TextEditingController _location;
   late final TextEditingController _description;
 
+  late final TextEditingController _sortOrder;
+
   late String _category;
   late bool _featured;
   bool _saving = false;
@@ -329,6 +434,10 @@ class _ProjectEditorDialogState extends State<_ProjectEditorDialog> {
     if (!_categories.contains(_category)) _category = 'Otros';
 
     _featured = project?.featured ?? false;
+
+    _sortOrder = TextEditingController(
+      text: (project?.sortOrder ?? 0).toString(),
+    );
   }
 
   @override
@@ -336,10 +445,15 @@ class _ProjectEditorDialogState extends State<_ProjectEditorDialog> {
     _title.dispose();
     _location.dispose();
     _description.dispose();
+
+    _sortOrder.dispose();
+
     super.dispose();
   }
 
   Future<void> _save() async {
+    final sortOrder = int.parse(_sortOrder.text.trim());
+
     if (!_formKey.currentState!.validate()) return;
 
     setState(() {
@@ -355,6 +469,7 @@ class _ProjectEditorDialogState extends State<_ProjectEditorDialog> {
           location: _location.text,
           description: _description.text,
           featured: _featured,
+          sortOrder: sortOrder,
         );
       } else {
         await WebProjectRepository.update(
@@ -364,6 +479,7 @@ class _ProjectEditorDialogState extends State<_ProjectEditorDialog> {
           location: _location.text,
           description: _description.text,
           featured: _featured,
+          sortOrder: sortOrder,
         );
       }
 
@@ -440,6 +556,31 @@ class _ProjectEditorDialogState extends State<_ProjectEditorDialog> {
                   ),
                 ),
                 const SizedBox(height: 10),
+                TextFormField(
+                  controller: _sortOrder,
+                  enabled: !_saving,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Orden de visualización',
+                    hintText: 'Ej.: 1',
+                    helperText: 'Un número menor aparece primero.',
+                    prefixIcon: Icon(Icons.format_list_numbered),
+                  ),
+                  validator: (value) {
+                    final number = int.tryParse(value?.trim() ?? '');
+
+                    if (number == null) {
+                      return 'Ingresa un número entero.';
+                    }
+
+                    if (number < 0) {
+                      return 'El orden no puede ser negativo.';
+                    }
+
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 14),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Destacar en la Home'),

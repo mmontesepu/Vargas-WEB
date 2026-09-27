@@ -55,8 +55,8 @@ class _QuotesPageState extends State<QuotesPage> {
     });
   }
 
-  Future<void> _save() async {
-    await QuoteRepository.saveAll(quotes);
+  Future<void> _save(Quote quote) async {
+    await QuoteRepository.save(quote);
   }
 
   Future<void> _createProject(Quote quote) async {
@@ -103,7 +103,7 @@ class _QuotesPageState extends State<QuotesPage> {
       quote.projectId = existingProject.id;
       quote.projectName = existingProject.name;
 
-      await _save();
+      await _save(quote);
 
       if (!mounted) return;
 
@@ -136,7 +136,7 @@ class _QuotesPageState extends State<QuotesPage> {
     quote.projectId = project.id;
     quote.projectName = project.name;
 
-    await _save();
+    await _save(quote);
 
     if (!mounted) return;
 
@@ -152,26 +152,6 @@ class _QuotesPageState extends State<QuotesPage> {
   }
 
   Future<void> _edit([Quote? existing]) async {
-    if (existing != null) {
-      final sourceProject =
-          await ProjectRepository.findBySourceQuote(existing.id);
-
-      if (!mounted) return;
-
-      if (sourceProject != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Esta cotización originó el proyecto '
-              '"${sourceProject.name}". '
-              'Sus datos comerciales aprobados no pueden modificarse.',
-            ),
-          ),
-        );
-        return;
-      }
-    }
-
     final result = await Navigator.push<Quote>(
       context,
       MaterialPageRoute(
@@ -182,23 +162,37 @@ class _QuotesPageState extends State<QuotesPage> {
       ),
     );
 
-    if (result == null) {
-      return;
-    }
+    if (result == null || !mounted) return;
 
-    setState(() {
-      final index = quotes.indexWhere(
-        (quote) => quote.id == result.id,
+    try {
+      await QuoteRepository.save(result);
+
+      if (!mounted) return;
+
+      await _load();
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            existing == null
+                ? 'Cotización creada correctamente.'
+                : 'Cotización actualizada correctamente.',
+          ),
+        ),
       );
+    } catch (error) {
+      if (!mounted) return;
 
-      if (index < 0) {
-        quotes.insert(0, result);
-      } else {
-        quotes[index] = result;
-      }
-    });
-
-    await _save();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'No fue posible guardar la cotización: $error',
+          ),
+        ),
+      );
+    }
   }
 
   @override

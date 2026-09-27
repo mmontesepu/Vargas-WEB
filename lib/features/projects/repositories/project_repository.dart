@@ -1,60 +1,146 @@
-import 'dart:convert';
-
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../quotes/models/quote.dart';
 import '../models/project.dart';
 
 class ProjectRepository {
-  static const String _storageKey = 'projects';
+  static SupabaseClient get _db => Supabase.instance.client;
+
+  static double _number(dynamic value) {
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  static DateTime _date(dynamic value) {
+    return DateTime.parse(value.toString());
+  }
+
+  static DateTime? _optionalDate(dynamic value) {
+    if (value == null || value.toString().isEmpty) {
+      return null;
+    }
+
+    return DateTime.tryParse(value.toString());
+  }
+
+  static Project _fromRow(Map<String, dynamic> row) {
+    return Project(
+      id: row['id']?.toString() ?? '',
+      clientId: row['client_id']?.toString() ?? '',
+      clientName: row['client_name']?.toString() ?? '',
+      sourceQuoteId: row['source_quote_id']?.toString() ?? '',
+      name: row['name']?.toString() ?? '',
+      address: row['address']?.toString() ?? '',
+      description: row['description']?.toString() ?? '',
+      status: row['status']?.toString() ?? 'Planificación',
+      startDate: _date(row['start_date']),
+      estimatedEndDate: _optionalDate(row['estimated_end_date']),
+      contractedNet: _number(row['contracted_net']),
+      contractedTotal: _number(row['contracted_total']),
+      budget: _number(row['budget']),
+      createdAt: _date(row['created_at']),
+    );
+  }
+
+  static Map<String, dynamic> _toRow(Project project) {
+    return {
+      'id': project.id,
+      'client_id': project.clientId,
+      'client_name': project.clientName,
+      'source_quote_id':
+          project.sourceQuoteId.trim().isEmpty ? null : project.sourceQuoteId,
+      'name': project.name,
+      'address': project.address,
+      'description': project.description,
+      'status': project.status,
+      'start_date': project.startDate.toIso8601String(),
+      'estimated_end_date': project.estimatedEndDate?.toIso8601String(),
+      'contracted_net': project.contractedNet,
+      'contracted_total': project.contractedTotal,
+      'budget': project.budget,
+      'created_at': project.createdAt.toIso8601String(),
+    };
+  }
 
   static Future<List<Project>> getAll() async {
-    final prefs = await SharedPreferences.getInstance();
+    final rows = await _db
+        .from('projects')
+        .select()
+        .order('created_at', ascending: false);
 
-    try {
-      final raw = prefs.getString(_storageKey) ?? '[]';
-
-      return (jsonDecode(raw) as List)
-          .map(
-            (item) => Project.fromJson(
-              Map<String, dynamic>.from(item),
-            ),
-          )
-          .toList();
-    } catch (_) {
-      return [];
-    }
+    return rows.map((row) => _fromRow(Map<String, dynamic>.from(row))).toList();
   }
 
-  static Future<void> saveAll(
-    List<Project> projects,
-  ) async {
-    final prefs = await SharedPreferences.getInstance();
+  static Future<Project?> findBySourceQuote(String quoteId) async {
+    if (quoteId.trim().isEmpty) return null;
 
-    final saved = await prefs.setString(
-      _storageKey,
-      jsonEncode(
-        projects.map((project) => project.toJson()).toList(),
-      ),
-    );
+    final row = await _db
+        .from('projects')
+        .select()
+        .eq('source_quote_id', quoteId)
+        .maybeSingle();
 
-    if (!saved) {
-      throw StateError('No se pudieron guardar los proyectos.');
-    }
+    if (row == null) return null;
+
+    return _fromRow(Map<String, dynamic>.from(row));
   }
 
-  static Future<Project?> findBySourceQuote(
-    String quoteId,
-  ) async {
-    final projects = await getAll();
+  static Future<void> save(Project project) async {
+    if (project.id.trim().isEmpty) {
+      throw StateError('El proyecto no tiene identificador.');
+    }
 
+    if (project.clientId.trim().isEmpty) {
+      throw StateError('El proyecto debe tener un cliente registrado.');
+    }
+
+    if (project.name.trim().isEmpty) {
+      throw StateError('Ingresa el nombre del proyecto.');
+    }
+
+    if (!project.budget.isFinite || project.budget < 0) {
+      throw StateError('El presupuesto de costos no es válido.');
+    }
+
+    if (project.estimatedEndDate != null &&
+        project.estimatedEndDate!.isBefore(project.startDate)) {
+      throw StateError(
+        'La fecha de término no puede ser anterior al inicio.',
+      );
+    }
+
+    // Solo actualiza un proyecto existente.
+    // La creación desde cotización utiliza la función transaccional.
+    final existing = await _db
+        .from('projects')
+        .select('id')
+        .eq('id', project.id)
+        .maybeSingle();
+
+    if (existing == null) {
+      throw StateError(
+        'El proyecto no existe. Debes crearlo desde una cotización aprobada.',
+      );
+    }
+
+    final data = _toRow(project)
+      ..remove('id')
+      ..remove('client_id')
+      ..remove('client_name')
+      ..remove('source_quote_id')
+      ..remove('contracted_net')
+      ..remove('contracted_total')
+      ..remove('created_at');
+
+    await _db.from('projects').update(data).eq('id', project.id);
+  }
+
+  // Compatibilidad temporal con llamadas antiguas.
+  // No crea proyectos nuevos ni elimina registros.
+  static Future<void> saveAll(List<Project> projects) async {
     for (final project in projects) {
-      if (project.sourceQuoteId == quoteId) {
-        return project;
-      }
+      await save(project);
     }
-
-    return null;
   }
 
   static Future<Project> createFromApprovedQuote({
@@ -91,7 +177,7 @@ class ProjectRepository {
       throw StateError('Ingresa el nombre del proyecto.');
     }
 
-    if (budget < 0) {
+    if (!budget.isFinite || budget < 0) {
       throw StateError(
         'El presupuesto de costos no puede ser negativo.',
       );
@@ -103,13 +189,9 @@ class ProjectRepository {
       );
     }
 
-    final projects = await getAll();
+    final existing = await findBySourceQuote(quote.id);
 
-    final alreadyExists = projects.any(
-      (project) => project.sourceQuoteId == quote.id,
-    );
-
-    if (alreadyExists) {
+    if (existing != null) {
       throw StateError(
         'Esta cotización ya generó un proyecto.',
       );
@@ -134,9 +216,12 @@ class ProjectRepository {
       createdAt: now,
     );
 
-    projects.insert(0, project);
-
-    await saveAll(projects);
+    await _db.rpc(
+      'create_project_from_quote',
+      params: {
+        'p_project': _toRow(project),
+      },
+    );
 
     return project;
   }

@@ -1,0 +1,755 @@
+﻿
+
+========================================
+ARCHIVO: lib/features/clients/models/client.dart
+========================================
+
+class Client {
+  String id;
+  String name;
+  String rut;
+  String email;
+  String phone;
+  String address;
+  String notes;
+  DateTime createdAt;
+
+  Client({
+    required this.id,
+    required this.name,
+    this.rut = '',
+    this.email = '',
+    this.phone = '',
+    this.address = '',
+    this.notes = '',
+    required this.createdAt,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'rut': rut,
+        'email': email,
+        'phone': phone,
+        'address': address,
+        'notes': notes,
+        'createdAt': createdAt.toIso8601String(),
+      };
+
+  factory Client.fromJson(Map<String, dynamic> json) {
+    return Client(
+      id: json['id'] ?? '',
+      name: json['name'] ?? '',
+      rut: json['rut'] ?? '',
+      email: json['email'] ?? '',
+      phone: json['phone'] ?? '',
+      address: json['address'] ?? '',
+      notes: json['notes'] ?? '',
+      createdAt: DateTime.tryParse(
+            json['createdAt'] ?? '',
+          ) ??
+          DateTime.now(),
+    );
+  }
+}
+
+========================================
+ARCHIVO: lib/features/clients/repositories/client_repository.dart
+========================================
+
+import 'dart:convert';
+
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../models/client.dart';
+
+class ClientRepository {
+  static const String _storageKey = 'clients';
+
+  static Future<List<Client>> getAll() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    try {
+      final raw = prefs.getString(_storageKey) ?? '[]';
+
+      return (jsonDecode(raw) as List)
+          .map(
+            (item) => Client.fromJson(
+              Map<String, dynamic>.from(item),
+            ),
+          )
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> saveAll(
+    List<Client> clients,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    await prefs.setString(
+      _storageKey,
+      jsonEncode(
+        clients.map((client) => client.toJson()).toList(),
+      ),
+    );
+  }
+}
+
+========================================
+ARCHIVO: lib/features/quotes/models/quote.dart
+========================================
+
+import 'quote_item.dart';
+
+class Quote {
+  String id;
+
+  // RelaciÃ³n con cliente
+  String clientId;
+  String client;
+
+  // RelaciÃ³n con proyecto / obra
+  String projectId;
+  String projectName;
+
+  String email;
+  String address;
+  String notes;
+  String payment;
+  String status;
+
+  DateTime date;
+
+  List<QuoteItem> items;
+
+  Quote(
+    this.id,
+    this.clientId,
+    this.client,
+    this.projectId,
+    this.projectName,
+    this.email,
+    this.address,
+    this.notes,
+    this.payment,
+    this.status,
+    this.date,
+    this.items,
+  );
+
+  double get net {
+    return items.fold<double>(
+      0,
+      (sum, item) => sum + item.total,
+    );
+  }
+
+  double get vat => (net * .19).roundToDouble();
+
+  double get total => net + vat;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'clientId': clientId,
+        'client': client,
+        'projectId': projectId,
+        'projectName': projectName,
+        'email': email,
+        'address': address,
+        'notes': notes,
+        'payment': payment,
+        'status': status,
+        'date': date.toIso8601String(),
+        'items': items
+            .map(
+              (item) => item.toJson(),
+            )
+            .toList(),
+      };
+
+  factory Quote.fromJson(
+    Map<String, dynamic> json,
+  ) {
+    return Quote(
+      json['id'] ?? '',
+
+      json['clientId'] ?? '',
+      json['client'] ?? '',
+
+      // Compatibilidad con cotizaciones antiguas.
+      // Si no existen estos campos simplemente
+      // quedarÃ¡n vacÃ­os.
+      json['projectId'] ?? '',
+      json['projectName'] ?? '',
+
+      json['email'] ?? '',
+      json['address'] ?? '',
+      json['notes'] ?? '',
+      json['payment'] ?? '',
+      json['status'] ?? 'Borrador',
+
+      DateTime.tryParse(
+            json['date'] ?? '',
+          ) ??
+          DateTime.now(),
+
+      (json['items'] as List? ?? [])
+          .map(
+            (item) => QuoteItem.fromJson(
+              Map<String, dynamic>.from(
+                item,
+              ),
+            ),
+          )
+          .toList(),
+    );
+  }
+}
+
+========================================
+ARCHIVO: lib/features/quotes/models/quote_item.dart
+========================================
+
+class QuoteItem {
+  String description;
+  String unit;
+  double quantity;
+  double price;
+
+  QuoteItem(
+    this.description,
+    this.unit,
+    this.quantity,
+    this.price,
+  );
+
+  double get total => quantity * price;
+
+  Map<String, dynamic> toJson() => {
+        'description': description,
+        'unit': unit,
+        'quantity': quantity,
+        'price': price,
+      };
+
+  factory QuoteItem.fromJson(Map<String, dynamic> json) {
+    return QuoteItem(
+      json['description'] ?? '',
+      json['unit'] ?? 'GL',
+      (json['quantity'] as num).toDouble(),
+      (json['price'] as num).toDouble(),
+    );
+  }
+}
+
+========================================
+ARCHIVO: lib/features/quotes/repositories/quote_repository.dart
+========================================
+
+import 'dart:convert';
+
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../models/quote.dart';
+
+class QuoteRepository {
+  static const String _storageKey = 'quotes';
+
+  static Future<List<Quote>> getAll() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    try {
+      final raw = prefs.getString(_storageKey) ?? '[]';
+
+      return (jsonDecode(raw) as List)
+          .map(
+            (item) => Quote.fromJson(
+              Map<String, dynamic>.from(item),
+            ),
+          )
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> saveAll(
+    List<Quote> quotes,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    await prefs.setString(
+      _storageKey,
+      jsonEncode(
+        quotes.map((quote) => quote.toJson()).toList(),
+      ),
+    );
+  }
+}
+
+========================================
+ARCHIVO: lib/features/projects/models/project.dart
+========================================
+
+class Project {
+  String id;
+
+  // Cliente
+  String clientId;
+  String clientName;
+
+  // CotizaciÃ³n que originÃ³ el proyecto
+  String sourceQuoteId;
+
+  // InformaciÃ³n de la obra
+  String name;
+  String address;
+  String description;
+  String status;
+
+  // PlanificaciÃ³n
+  DateTime startDate;
+  DateTime? estimatedEndDate;
+
+  // Montos comerciales aprobados
+  double contractedNet;
+  double contractedTotal;
+
+  // Presupuesto operativo de costos
+  double budget;
+
+  DateTime createdAt;
+
+  Project({
+    required this.id,
+    required this.clientId,
+    required this.clientName,
+    this.sourceQuoteId = '',
+    required this.name,
+    this.address = '',
+    this.description = '',
+    this.status = 'PlanificaciÃ³n',
+    required this.startDate,
+    this.estimatedEndDate,
+    this.contractedNet = 0,
+    this.contractedTotal = 0,
+    this.budget = 0,
+    required this.createdAt,
+  });
+
+  bool get hasSourceQuote => sourceQuoteId.trim().isNotEmpty;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'clientId': clientId,
+        'clientName': clientName,
+        'sourceQuoteId': sourceQuoteId,
+        'name': name,
+        'address': address,
+        'description': description,
+        'status': status,
+        'startDate': startDate.toIso8601String(),
+        'estimatedEndDate': estimatedEndDate?.toIso8601String(),
+        'contractedNet': contractedNet,
+        'contractedTotal': contractedTotal,
+        'budget': budget,
+        'createdAt': createdAt.toIso8601String(),
+      };
+
+  factory Project.fromJson(Map<String, dynamic> json) {
+    return Project(
+      id: json['id'] ?? '',
+      clientId: json['clientId'] ?? '',
+      clientName: json['clientName'] ?? '',
+
+      // Compatibilidad con proyectos antiguos.
+      sourceQuoteId: json['sourceQuoteId'] ?? '',
+
+      name: json['name'] ?? '',
+      address: json['address'] ?? '',
+      description: json['description'] ?? '',
+      status: json['status'] ?? 'PlanificaciÃ³n',
+
+      startDate: DateTime.tryParse(
+            json['startDate'] ?? '',
+          ) ??
+          DateTime.now(),
+
+      estimatedEndDate: json['estimatedEndDate'] != null
+          ? DateTime.tryParse(
+              json['estimatedEndDate'],
+            )
+          : null,
+
+      // Los proyectos antiguos no tienen estos montos.
+      contractedNet: (json['contractedNet'] as num?)?.toDouble() ?? 0,
+
+      contractedTotal: (json['contractedTotal'] as num?)?.toDouble() ?? 0,
+
+      budget: (json['budget'] as num?)?.toDouble() ?? 0,
+
+      createdAt: DateTime.tryParse(
+            json['createdAt'] ?? '',
+          ) ??
+          DateTime.now(),
+    );
+  }
+}
+
+========================================
+ARCHIVO: lib/features/projects/repositories/project_repository.dart
+========================================
+
+import 'dart:convert';
+
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../quotes/models/quote.dart';
+import '../models/project.dart';
+
+class ProjectRepository {
+  static const String _storageKey = 'projects';
+
+  static Future<List<Project>> getAll() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    try {
+      final raw = prefs.getString(_storageKey) ?? '[]';
+
+      return (jsonDecode(raw) as List)
+          .map(
+            (item) => Project.fromJson(
+              Map<String, dynamic>.from(item),
+            ),
+          )
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> saveAll(
+    List<Project> projects,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final saved = await prefs.setString(
+      _storageKey,
+      jsonEncode(
+        projects.map((project) => project.toJson()).toList(),
+      ),
+    );
+
+    if (!saved) {
+      throw StateError('No se pudieron guardar los proyectos.');
+    }
+  }
+
+  static Future<Project?> findBySourceQuote(
+    String quoteId,
+  ) async {
+    final projects = await getAll();
+
+    for (final project in projects) {
+      if (project.sourceQuoteId == quoteId) {
+        return project;
+      }
+    }
+
+    return null;
+  }
+
+  static Future<Project> createFromApprovedQuote({
+    required Quote quote,
+    required String name,
+    required DateTime startDate,
+    DateTime? estimatedEndDate,
+    String description = '',
+    double budget = 0,
+  }) async {
+    if (quote.status != 'Aprobada') {
+      throw StateError(
+        'Solo una cotizaciÃ³n aprobada puede generar un proyecto.',
+      );
+    }
+
+    if (quote.id.trim().isEmpty) {
+      throw StateError('La cotizaciÃ³n no tiene identificador.');
+    }
+
+    if (quote.clientId.trim().isEmpty) {
+      throw StateError(
+        'La cotizaciÃ³n debe estar asociada a un cliente registrado.',
+      );
+    }
+
+    if (quote.projectId.trim().isNotEmpty) {
+      throw StateError(
+        'Esta cotizaciÃ³n ya estÃ¡ asociada a una obra.',
+      );
+    }
+
+    if (name.trim().isEmpty) {
+      throw StateError('Ingresa el nombre del proyecto.');
+    }
+
+    if (budget < 0) {
+      throw StateError(
+        'El presupuesto de costos no puede ser negativo.',
+      );
+    }
+
+    if (estimatedEndDate != null && estimatedEndDate.isBefore(startDate)) {
+      throw StateError(
+        'La fecha de tÃ©rmino no puede ser anterior al inicio.',
+      );
+    }
+
+    final projects = await getAll();
+
+    final alreadyExists = projects.any(
+      (project) => project.sourceQuoteId == quote.id,
+    );
+
+    if (alreadyExists) {
+      throw StateError(
+        'Esta cotizaciÃ³n ya generÃ³ un proyecto.',
+      );
+    }
+
+    final now = DateTime.now();
+
+    final project = Project(
+      id: 'PRY-${now.microsecondsSinceEpoch}',
+      clientId: quote.clientId,
+      clientName: quote.client,
+      sourceQuoteId: quote.id,
+      name: name.trim(),
+      address: quote.address.trim(),
+      description: description.trim(),
+      status: 'PlanificaciÃ³n',
+      startDate: startDate,
+      estimatedEndDate: estimatedEndDate,
+      contractedNet: quote.net,
+      contractedTotal: quote.total,
+      budget: budget,
+      createdAt: now,
+    );
+
+    projects.insert(0, project);
+
+    await saveAll(projects);
+
+    return project;
+  }
+}
+
+========================================
+ARCHIVO: lib/features/projects/models/project_expense.dart
+========================================
+
+class ProjectExpense {
+  final String id;
+  final String projectId;
+
+  final DateTime date;
+  final String category;
+  final String description;
+  final String supplier;
+
+  final double amount;
+  final DateTime createdAt;
+
+  const ProjectExpense({
+    required this.id,
+    required this.projectId,
+    required this.date,
+    required this.category,
+    required this.description,
+    this.supplier = '',
+    required this.amount,
+    required this.createdAt,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'projectId': projectId,
+        'date': date.toIso8601String(),
+        'category': category,
+        'description': description,
+        'supplier': supplier,
+        'amount': amount,
+        'createdAt': createdAt.toIso8601String(),
+      };
+
+  factory ProjectExpense.fromJson(Map<String, dynamic> json) {
+    return ProjectExpense(
+      id: json['id']?.toString() ?? '',
+      projectId: json['projectId']?.toString() ?? '',
+      date: DateTime.tryParse(
+            json['date']?.toString() ?? '',
+          ) ??
+          DateTime.now(),
+      category: json['category']?.toString() ?? 'Otros',
+      description: json['description']?.toString() ?? '',
+      supplier: json['supplier']?.toString() ?? '',
+      amount: (json['amount'] as num?)?.toDouble() ?? 0,
+      createdAt: DateTime.tryParse(
+            json['createdAt']?.toString() ?? '',
+          ) ??
+          DateTime.now(),
+    );
+  }
+}
+
+========================================
+ARCHIVO: lib/features/projects/repositories/project_expense_repository.dart
+========================================
+
+import 'dart:convert';
+
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../models/project_expense.dart';
+
+class ProjectExpenseRepository {
+  static const String _storageKey = 'project_expenses';
+
+  static Future<List<ProjectExpense>> getAll() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_storageKey);
+
+    if (raw == null || raw.isEmpty) {
+      return [];
+    }
+
+    final decoded = jsonDecode(raw) as List<dynamic>;
+
+    return decoded
+        .map(
+          (item) => ProjectExpense.fromJson(
+            Map<String, dynamic>.from(item as Map),
+          ),
+        )
+        .toList();
+  }
+
+  static Future<List<ProjectExpense>> getByProject(
+    String projectId,
+  ) async {
+    final expenses = await getAll();
+
+    return expenses.where((expense) => expense.projectId == projectId).toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
+  }
+
+  static Future<void> saveAll(
+    List<ProjectExpense> expenses,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final encoded = jsonEncode(
+      expenses.map((expense) => expense.toJson()).toList(),
+    );
+
+    final saved = await prefs.setString(_storageKey, encoded);
+
+    if (!saved) {
+      throw StateError(
+        'No se pudieron guardar los gastos del proyecto.',
+      );
+    }
+  }
+
+  static void _validate(ProjectExpense expense) {
+    if (expense.id.trim().isEmpty || expense.projectId.trim().isEmpty) {
+      throw ArgumentError(
+        'El gasto debe tener un ID y un proyecto vÃ¡lido.',
+      );
+    }
+
+    if (expense.description.trim().isEmpty) {
+      throw ArgumentError(
+        'Debes ingresar una descripciÃ³n.',
+      );
+    }
+
+    if (!expense.amount.isFinite || expense.amount <= 0) {
+      throw ArgumentError(
+        'El monto debe ser mayor que cero.',
+      );
+    }
+  }
+
+  static Future<void> add(
+    ProjectExpense expense,
+  ) async {
+    _validate(expense);
+
+    final expenses = await getAll();
+
+    if (expenses.any((item) => item.id == expense.id)) {
+      throw StateError(
+        'Ya existe un gasto con este identificador.',
+      );
+    }
+
+    expenses.add(expense);
+    await saveAll(expenses);
+  }
+
+  static Future<void> update(
+    ProjectExpense expense,
+  ) async {
+    _validate(expense);
+
+    final expenses = await getAll();
+
+    final index = expenses.indexWhere(
+      (item) => item.id == expense.id && item.projectId == expense.projectId,
+    );
+
+    if (index == -1) {
+      throw StateError(
+        'No se encontrÃ³ el gasto que deseas editar.',
+      );
+    }
+
+    expenses[index] = expense;
+    await saveAll(expenses);
+  }
+
+  static Future<void> delete({
+    required String id,
+    required String projectId,
+  }) async {
+    final expenses = await getAll();
+
+    final index = expenses.indexWhere(
+      (item) => item.id == id && item.projectId == projectId,
+    );
+
+    if (index == -1) {
+      throw StateError(
+        'No se encontrÃ³ el gasto que deseas eliminar.',
+      );
+    }
+
+    expenses.removeAt(index);
+    await saveAll(expenses);
+  }
+
+  static Future<double> totalByProject(
+    String projectId,
+  ) async {
+    final expenses = await getByProject(projectId);
+
+    return expenses.fold<double>(
+      0,
+      (total, expense) => total + expense.amount,
+    );
+  }
+}

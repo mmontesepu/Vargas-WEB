@@ -10,6 +10,8 @@ import '../repositories/project_repository.dart';
 
 import '../../quotes/models/quote.dart';
 
+import '../../../core/formatters/clp_input_formatter.dart';
+
 class ProjectEditorPage extends StatefulWidget {
   final Project? existing;
   final Quote? sourceQuote;
@@ -107,7 +109,7 @@ class _ProjectEditorPageState extends State<ProjectEditorPage> {
     _budget = TextEditingController(
       text: project == null || project.budget == 0
           ? ''
-          : project.budget.round().toString(),
+          : ClpInputFormatter.format(project.budget.round().toString()),
     );
 
     _clientId = project?.clientId ?? widget.sourceQuote?.clientId;
@@ -529,7 +531,7 @@ class _ProjectEditorPageState extends State<ProjectEditorPage> {
                         controller: _budget,
                         keyboardType: TextInputType.number,
                         inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly,
+                          const ClpInputFormatter(),
                         ],
                         decoration: const InputDecoration(
                           labelText: 'Presupuesto de costos',
@@ -730,7 +732,7 @@ class _ProjectEditorPageState extends State<ProjectEditorPage> {
     final address = _address.text.trim();
     final description = _description.text.trim();
 
-    final budget = double.tryParse(_budget.text) ?? 0;
+    final budget = ClpInputFormatter.parse(_budget.text);
 
     if (budget < 0) {
       ScaffoldMessenger.of(context).showSnackBar(

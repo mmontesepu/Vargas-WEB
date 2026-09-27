@@ -1,0 +1,2233 @@
+
+========== lib/features/projects/models/project.dart ==========
+
+class Project {
+  String id;
+
+  // Cliente
+  String clientId;
+  String clientName;
+
+  // Cotización que originó el proyecto
+  String sourceQuoteId;
+
+  // Información de la obra
+  String name;
+  String address;
+  String description;
+  String status;
+
+  // Planificación
+  DateTime startDate;
+  DateTime? estimatedEndDate;
+
+  // Montos comerciales aprobados
+  double contractedNet;
+  double contractedTotal;
+
+  // Presupuesto operativo de costos
+  double budget;
+
+  DateTime createdAt;
+
+  Project({
+    required this.id,
+    required this.clientId,
+    required this.clientName,
+    this.sourceQuoteId = '',
+    required this.name,
+    this.address = '',
+    this.description = '',
+    this.status = 'Planificación',
+    required this.startDate,
+    this.estimatedEndDate,
+    this.contractedNet = 0,
+    this.contractedTotal = 0,
+    this.budget = 0,
+    required this.createdAt,
+  });
+
+  bool get hasSourceQuote => sourceQuoteId.trim().isNotEmpty;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'clientId': clientId,
+        'clientName': clientName,
+        'sourceQuoteId': sourceQuoteId,
+        'name': name,
+        'address': address,
+        'description': description,
+        'status': status,
+        'startDate': startDate.toIso8601String(),
+        'estimatedEndDate': estimatedEndDate?.toIso8601String(),
+        'contractedNet': contractedNet,
+        'contractedTotal': contractedTotal,
+        'budget': budget,
+        'createdAt': createdAt.toIso8601String(),
+      };
+
+  factory Project.fromJson(Map<String, dynamic> json) {
+    return Project(
+      id: json['id'] ?? '',
+      clientId: json['clientId'] ?? '',
+      clientName: json['clientName'] ?? '',
+
+      // Compatibilidad con proyectos antiguos.
+      sourceQuoteId: json['sourceQuoteId'] ?? '',
+
+      name: json['name'] ?? '',
+      address: json['address'] ?? '',
+      description: json['description'] ?? '',
+      status: json['status'] ?? 'Planificación',
+
+      startDate: DateTime.tryParse(
+            json['startDate'] ?? '',
+          ) ??
+          DateTime.now(),
+
+      estimatedEndDate: json['estimatedEndDate'] != null
+          ? DateTime.tryParse(
+              json['estimatedEndDate'],
+            )
+          : null,
+
+      // Los proyectos antiguos no tienen estos montos.
+      contractedNet: (json['contractedNet'] as num?)?.toDouble() ?? 0,
+
+      contractedTotal: (json['contractedTotal'] as num?)?.toDouble() ?? 0,
+
+      budget: (json['budget'] as num?)?.toDouble() ?? 0,
+
+      createdAt: DateTime.tryParse(
+            json['createdAt'] ?? '',
+          ) ??
+          DateTime.now(),
+    );
+  }
+}
+
+========== lib/features/projects/repositories/project_repository.dart ==========
+
+import 'dart:convert';
+
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../quotes/models/quote.dart';
+import '../models/project.dart';
+
+class ProjectRepository {
+  static const String _storageKey = 'projects';
+
+  static Future<List<Project>> getAll() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    try {
+      final raw = prefs.getString(_storageKey) ?? '[]';
+
+      return (jsonDecode(raw) as List)
+          .map(
+            (item) => Project.fromJson(
+              Map<String, dynamic>.from(item),
+            ),
+          )
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> saveAll(
+    List<Project> projects,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final saved = await prefs.setString(
+      _storageKey,
+      jsonEncode(
+        projects.map((project) => project.toJson()).toList(),
+      ),
+    );
+
+    if (!saved) {
+      throw StateError('No se pudieron guardar los proyectos.');
+    }
+  }
+
+  static Future<Project?> findBySourceQuote(
+    String quoteId,
+  ) async {
+    final projects = await getAll();
+
+    for (final project in projects) {
+      if (project.sourceQuoteId == quoteId) {
+        return project;
+      }
+    }
+
+    return null;
+  }
+
+  static Future<Project> createFromApprovedQuote({
+    required Quote quote,
+    required String name,
+    required DateTime startDate,
+    DateTime? estimatedEndDate,
+    String description = '',
+    double budget = 0,
+  }) async {
+    if (quote.status != 'Aprobada') {
+      throw StateError(
+        'Solo una cotización aprobada puede generar un proyecto.',
+      );
+    }
+
+    if (quote.id.trim().isEmpty) {
+      throw StateError('La cotización no tiene identificador.');
+    }
+
+    if (quote.clientId.trim().isEmpty) {
+      throw StateError(
+        'La cotización debe estar asociada a un cliente registrado.',
+      );
+    }
+
+    if (quote.projectId.trim().isNotEmpty) {
+      throw StateError(
+        'Esta cotización ya está asociada a una obra.',
+      );
+    }
+
+    if (name.trim().isEmpty) {
+      throw StateError('Ingresa el nombre del proyecto.');
+    }
+
+    if (budget < 0) {
+      throw StateError(
+        'El presupuesto de costos no puede ser negativo.',
+      );
+    }
+
+    if (estimatedEndDate != null && estimatedEndDate.isBefore(startDate)) {
+      throw StateError(
+        'La fecha de término no puede ser anterior al inicio.',
+      );
+    }
+
+    final projects = await getAll();
+
+    final alreadyExists = projects.any(
+      (project) => project.sourceQuoteId == quote.id,
+    );
+
+    if (alreadyExists) {
+      throw StateError(
+        'Esta cotización ya generó un proyecto.',
+      );
+    }
+
+    final now = DateTime.now();
+
+    final project = Project(
+      id: 'PRY-${now.microsecondsSinceEpoch}',
+      clientId: quote.clientId,
+      clientName: quote.client,
+      sourceQuoteId: quote.id,
+      name: name.trim(),
+      address: quote.address.trim(),
+      description: description.trim(),
+      status: 'Planificación',
+      startDate: startDate,
+      estimatedEndDate: estimatedEndDate,
+      contractedNet: quote.net,
+      contractedTotal: quote.total,
+      budget: budget,
+      createdAt: now,
+    );
+
+    projects.insert(0, project);
+
+    await saveAll(projects);
+
+    return project;
+  }
+}
+
+========== lib/features/projects/presentation/projects_page.dart ==========
+
+import 'package:flutter/material.dart';
+
+import '../../../app/theme/app_theme.dart';
+import '../models/project.dart';
+import '../repositories/project_repository.dart';
+import 'project_editor_page.dart';
+import 'project_detail_page.dart';
+
+String _money(num value) => '\$${value.round().toString().replaceAllMapped(
+      RegExp(r'\B(?=(\d{3})+(?!\d))'),
+      (match) => '.',
+    )}';
+
+class ProjectsPage extends StatefulWidget {
+  const ProjectsPage({super.key});
+
+  @override
+  State<ProjectsPage> createState() => _ProjectsPageState();
+}
+
+class _ProjectsPageState extends State<ProjectsPage> {
+  final TextEditingController _searchController = TextEditingController();
+
+  List<Project> _projects = [];
+
+  bool _loading = true;
+
+  String _search = '';
+  String _statusFilter = 'Todos';
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final projects = await ProjectRepository.getAll();
+
+    if (!mounted) return;
+
+    setState(() {
+      _projects = projects;
+      _loading = false;
+    });
+  }
+
+  Future<void> _save() async {
+    await ProjectRepository.saveAll(
+      _projects,
+    );
+  }
+
+  Future<void> _edit([
+    Project? existing,
+  ]) async {
+    final result = await Navigator.push<Project>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ProjectEditorPage(
+          existing: existing,
+        ),
+      ),
+    );
+
+    if (result == null) return;
+
+    setState(() {
+      final index = _projects.indexWhere(
+        (project) => project.id == result.id,
+      );
+
+      if (index == -1) {
+        _projects.insert(0, result);
+      } else {
+        _projects[index] = result;
+      }
+    });
+
+    await _save();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final search = _search.trim().toLowerCase();
+
+    final filtered = _projects.where((project) {
+      final matchesSearch = search.isEmpty ||
+          project.name.toLowerCase().contains(search) ||
+          project.clientName.toLowerCase().contains(search) ||
+          project.address.toLowerCase().contains(search) ||
+          project.id.toLowerCase().contains(search);
+
+      final matchesStatus =
+          _statusFilter == 'Todos' || project.status == _statusFilter;
+
+      return matchesSearch && matchesStatus;
+    }).toList();
+
+    final planning = _countStatus(
+      'Planificación',
+    );
+
+    final active = _countStatus(
+      'En ejecución',
+    );
+
+    final finished = _countStatus(
+      'Finalizado',
+    );
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(30),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(
+            maxWidth: 1300,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              //
+              // HEADER
+              //
+              LayoutBuilder(
+                builder: (
+                  context,
+                  constraints,
+                ) {
+                  final compact = constraints.maxWidth < 700;
+
+                  final title = const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Obras / Proyectos',
+                        style: TextStyle(
+                          fontSize: 30,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'Gestiona las obras y proyectos de Vargas SPA.',
+                        style: TextStyle(
+                          color: Colors.white54,
+                        ),
+                      ),
+                    ],
+                  );
+
+                  final button = OutlinedButton.icon(
+                    onPressed: null,
+                    icon: const Icon(
+                      Icons.receipt_long_outlined,
+                    ),
+                    label: const Text(
+                      'Crear desde cotización aprobada',
+                    ),
+                  );
+
+                  if (compact) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        title,
+                        const SizedBox(
+                          height: 18,
+                        ),
+                        button,
+                      ],
+                    );
+                  }
+
+                  return Row(
+                    children: [
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Obras / Proyectos',
+                              style: TextStyle(
+                                fontSize: 30,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            SizedBox(
+                              height: 8,
+                            ),
+                            Text(
+                              'Gestiona las obras y proyectos de Vargas SPA.',
+                              style: TextStyle(
+                                color: Colors.white54,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      button,
+                    ],
+                  );
+                },
+              ),
+
+              const SizedBox(height: 28),
+
+              //
+              // INDICADORES
+              //
+              Wrap(
+                spacing: 15,
+                runSpacing: 15,
+                children: [
+                  _summaryCard(
+                    title: 'Proyectos',
+                    value: '${_projects.length}',
+                    icon: Icons.apartment_outlined,
+                  ),
+                  _summaryCard(
+                    title: 'En ejecución',
+                    value: '$active',
+                    icon: Icons.construction_outlined,
+                  ),
+                  _summaryCard(
+                    title: 'Planificación',
+                    value: '$planning',
+                    icon: Icons.calendar_month_outlined,
+                  ),
+                  _summaryCard(
+                    title: 'Finalizados',
+                    value: '$finished',
+                    icon: Icons.check_circle_outline,
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 24),
+
+              //
+              // FILTROS
+              //
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  _statusChip(
+                    'Todos',
+                    _projects.length,
+                  ),
+                  _statusChip(
+                    'Planificación',
+                    planning,
+                  ),
+                  _statusChip(
+                    'En ejecución',
+                    active,
+                  ),
+                  _statusChip(
+                    'Pausado',
+                    _countStatus(
+                      'Pausado',
+                    ),
+                  ),
+                  _statusChip(
+                    'Finalizado',
+                    finished,
+                  ),
+                  _statusChip(
+                    'Cancelado',
+                    _countStatus(
+                      'Cancelado',
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 24),
+
+              //
+              // BUSCADOR
+              //
+              TextField(
+                controller: _searchController,
+                onChanged: (value) {
+                  setState(() {
+                    _search = value;
+                  });
+                },
+                decoration: InputDecoration(
+                  hintText:
+                      'Buscar por proyecto, cliente, dirección o código...',
+                  prefixIcon: const Icon(
+                    Icons.search,
+                  ),
+                  suffixIcon: _search.isNotEmpty
+                      ? IconButton(
+                          onPressed: _clearFilters,
+                          icon: const Icon(
+                            Icons.close,
+                          ),
+                        )
+                      : null,
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
+              //
+              // LISTADO
+              //
+              if (_loading)
+                const Padding(
+                  padding: EdgeInsets.all(60),
+                  child: Center(
+                    child: CircularProgressIndicator(),
+                  ),
+                )
+              else if (_projects.isEmpty)
+                _emptyProjects()
+              else if (filtered.isEmpty)
+                _emptySearch()
+              else
+                ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: filtered.length,
+                  separatorBuilder: (_, __) => const SizedBox(
+                    height: 10,
+                  ),
+                  itemBuilder: (_, index) {
+                    return _projectCard(
+                      filtered[index],
+                    );
+                  },
+                ),
+
+              const SizedBox(height: 30),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  int _countStatus(
+    String status,
+  ) {
+    return _projects
+        .where(
+          (project) => project.status == status,
+        )
+        .length;
+  }
+
+  Widget _summaryCard({
+    required String title,
+    required String value,
+    required IconData icon,
+  }) {
+    return Container(
+      width: 250,
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: panel,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.white.withValues(
+            alpha: 0.06,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: gold.withValues(
+                alpha: 0.12,
+              ),
+              borderRadius: BorderRadius.circular(
+                10,
+              ),
+            ),
+            child: Icon(
+              icon,
+              color: gold,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.white60,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                value,
+                style: const TextStyle(
+                  color: gold,
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _statusChip(
+    String status,
+    int count,
+  ) {
+    final selected = _statusFilter == status;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(30),
+      onTap: () {
+        setState(() {
+          _statusFilter = status;
+        });
+      },
+      child: AnimatedContainer(
+        duration: const Duration(
+          milliseconds: 180,
+        ),
+        padding: const EdgeInsets.symmetric(
+          horizontal: 15,
+          vertical: 9,
+        ),
+        decoration: BoxDecoration(
+          color: selected
+              ? gold.withValues(
+                  alpha: 0.16,
+                )
+              : panel,
+          borderRadius: BorderRadius.circular(30),
+          border: Border.all(
+            color: selected
+                ? gold
+                : Colors.white.withValues(
+                    alpha: 0.06,
+                  ),
+          ),
+        ),
+        child: Text(
+          '$status  $count',
+          style: TextStyle(
+            color: selected ? gold : Colors.white70,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _financialInfo(Project project) {
+    final net = project.contractedNet;
+    final total = project.contractedTotal;
+    final budget = project.budget;
+
+    final margin = net - budget;
+    final marginPercent = net > 0 ? (margin / net) * 100 : 0.0;
+
+    final hasContract = project.hasSourceQuote;
+
+    Widget amount({
+      required String label,
+      required double value,
+      Color color = Colors.white,
+      String? explanation,
+    }) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.white54,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              if (explanation != null) ...[
+                const SizedBox(width: 5),
+                Tooltip(
+                  message: explanation,
+                  preferBelow: false,
+                  constraints: const BoxConstraints(
+                    maxWidth: 280,
+                  ),
+                  child: const Icon(
+                    Icons.info_outline,
+                    size: 15,
+                    color: Colors.white54,
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 5),
+          Text(
+            _money(value),
+            style: TextStyle(
+              color: color,
+              fontSize: 17,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: panel,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.07),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (hasContract) ...[
+            Text(
+              'Cotización de origen: ${project.sourceQuoteId}',
+              style: const TextStyle(
+                color: Colors.white54,
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
+          Wrap(
+            spacing: 30,
+            runSpacing: 18,
+            children: [
+              SizedBox(
+                width: 190,
+                child: amount(
+                  label: 'Neto contratado',
+                  value: net,
+                  color: gold,
+                  explanation:
+                      'Valor de venta aprobado en la cotización, sin IVA.',
+                ),
+              ),
+              SizedBox(
+                width: 190,
+                child: amount(
+                  label: 'Total con IVA',
+                  value: total,
+                  explanation: 'Monto total de venta aprobado, incluyendo IVA.',
+                ),
+              ),
+              SizedBox(
+                width: 190,
+                child: amount(
+                  label: 'Presupuesto estimado de costos',
+                  value: budget,
+                  explanation:
+                      'Monto estimado para ejecutar la obra: materiales, '
+                      'mano de obra, transporte y otros costos. '
+                      'No corresponde a los gastos reales registrados.',
+                ),
+              ),
+            ],
+          ),
+          if (hasContract) ...[
+            const SizedBox(height: 16),
+            const Divider(
+              color: Colors.white12,
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 30,
+              runSpacing: 12,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                amount(
+                  label: 'Margen bruto presupuestado',
+                  value: margin,
+                  explanation:
+                      'Diferencia entre el neto contratado y el presupuesto '
+                      'estimado de costos. No representa la utilidad final.',
+                  color: margin >= 0 ? Colors.greenAccent : Colors.redAccent,
+                ),
+                Text(
+                  '${marginPercent.toStringAsFixed(1)}%',
+                  style: TextStyle(
+                    color: margin >= 0 ? Colors.greenAccent : Colors.redAccent,
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ] else ...[
+            const SizedBox(height: 12),
+            const Text(
+              'Proyecto anterior sin cotización de origen.',
+              style: TextStyle(
+                color: Colors.white38,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openProject(Project project) async {
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ProjectDetailPage(
+          project: project,
+        ),
+      ),
+    );
+  }
+
+  Widget _projectCard(
+    Project project,
+  ) {
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: LayoutBuilder(
+          builder: (
+            context,
+            constraints,
+          ) {
+            final compact = constraints.maxWidth < 700;
+
+            final information = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      project.name,
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    _statusBadge(
+                      project.status,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 7),
+                Text(
+                  project.clientName,
+                  style: const TextStyle(
+                    color: gold,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 15,
+                  runSpacing: 7,
+                  children: [
+                    _metadata(
+                      Icons.calendar_today_outlined,
+                      'Inicio: ${_formatDate(project.startDate)}',
+                    ),
+                    if (project.estimatedEndDate != null)
+                      _metadata(
+                        Icons.event_available_outlined,
+                        'Término: ${_formatDate(project.estimatedEndDate!)}',
+                      ),
+                    if (project.address.isNotEmpty)
+                      _metadata(
+                        Icons.location_on_outlined,
+                        project.address,
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                _financialInfo(project),
+              ],
+            );
+
+            final actions = Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: 'Ver detalle de obra',
+                  onPressed: () => _openProject(project),
+                  icon: const Icon(
+                    Icons.visibility_outlined,
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Editar proyecto',
+                  onPressed: () => _edit(project),
+                  icon: const Icon(
+                    Icons.edit_outlined,
+                  ),
+                ),
+              ],
+            );
+
+            if (compact) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  information,
+                  const SizedBox(
+                    height: 15,
+                  ),
+                  const Divider(),
+                  Row(
+                    children: [
+                      const Spacer(),
+                      actions,
+                    ],
+                  ),
+                ],
+              );
+            }
+
+            return Row(
+              children: [
+                Expanded(
+                  child: information,
+                ),
+                const SizedBox(
+                  width: 20,
+                ),
+                actions,
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _statusBadge(
+    String status,
+  ) {
+    IconData icon;
+
+    switch (status) {
+      case 'En ejecución':
+        icon = Icons.construction_outlined;
+        break;
+
+      case 'Finalizado':
+        icon = Icons.check_circle_outline;
+        break;
+
+      case 'Pausado':
+        icon = Icons.pause_circle_outline;
+        break;
+
+      case 'Cancelado':
+        icon = Icons.cancel_outlined;
+        break;
+
+      default:
+        icon = Icons.calendar_month_outlined;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 9,
+        vertical: 4,
+      ),
+      decoration: BoxDecoration(
+        color: gold.withValues(
+          alpha: 0.10,
+        ),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 14,
+            color: gold,
+          ),
+          const SizedBox(width: 5),
+          Text(
+            status,
+            style: const TextStyle(
+              color: gold,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _metadata(
+    IconData icon,
+    String text,
+  ) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          icon,
+          size: 14,
+          color: Colors.white38,
+        ),
+        const SizedBox(width: 5),
+        Text(
+          text,
+          style: const TextStyle(
+            color: Colors.white54,
+            fontSize: 12,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _emptyProjects() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(
+        vertical: 65,
+      ),
+      decoration: BoxDecoration(
+        color: panel,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          const Icon(
+            Icons.apartment_outlined,
+            size: 50,
+            color: gold,
+          ),
+          const SizedBox(height: 15),
+          const Text(
+            'Aún no tienes proyectos',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 7),
+          const Text(
+            'Las obras se generan desde cotizaciones aprobadas.',
+            style: TextStyle(
+              color: Colors.white54,
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: 24,
+            ),
+            child: Text(
+              'Para registrar una nueva obra, crea una cotización, '
+              'márcala como aprobada y utiliza la acción '
+              '"Crear proyecto" desde Cotizaciones.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white60,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _emptySearch() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(
+        vertical: 55,
+      ),
+      decoration: BoxDecoration(
+        color: panel,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          const Icon(
+            Icons.search_off,
+            size: 45,
+            color: Colors.white38,
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            'No se encontraron proyectos',
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 5),
+          const Text(
+            'Prueba cambiando la búsqueda o el estado.',
+            style: TextStyle(
+              color: Colors.white54,
+            ),
+          ),
+          const SizedBox(height: 15),
+          TextButton.icon(
+            onPressed: _clearFilters,
+            icon: const Icon(
+              Icons.filter_alt_off_outlined,
+            ),
+            label: const Text(
+              'Limpiar filtros',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _clearFilters() {
+    _searchController.clear();
+
+    setState(() {
+      _search = '';
+      _statusFilter = 'Todos';
+    });
+  }
+
+  String _formatDate(
+    DateTime date,
+  ) {
+    return '${date.day.toString().padLeft(2, '0')}/'
+        '${date.month.toString().padLeft(2, '0')}/'
+        '${date.year}';
+  }
+}
+
+========== lib/features/projects/presentation/project_editor_page.dart ==========
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../../../app/theme/app_theme.dart';
+import '../../clients/models/client.dart';
+import '../../clients/repositories/client_repository.dart';
+import '../models/project.dart';
+
+import '../repositories/project_repository.dart';
+
+import '../../quotes/models/quote.dart';
+
+class ProjectEditorPage extends StatefulWidget {
+  final Project? existing;
+  final Quote? sourceQuote;
+
+  const ProjectEditorPage({
+    super.key,
+    this.existing,
+    this.sourceQuote,
+  }) : assert(
+          existing == null || sourceQuote == null,
+          'No se puede editar un proyecto y crear desde una cotización al mismo tiempo.',
+        );
+
+  @override
+  State<ProjectEditorPage> createState() => _ProjectEditorPageState();
+}
+
+class _ProjectEditorPageState extends State<ProjectEditorPage> {
+  final _formKey = GlobalKey<FormState>();
+
+  late final TextEditingController _name;
+  late final TextEditingController _address;
+  late final TextEditingController _description;
+  late final TextEditingController _budget;
+
+  List<Client> _clients = [];
+
+  String? _clientId;
+  String _status = 'Planificación';
+
+  late DateTime _startDate;
+  DateTime? _estimatedEndDate;
+
+  bool _loadingClients = true;
+
+  String _buildQuoteDescription(Quote quote) {
+    String money(num value) {
+      final formatted = value.round().toString().replaceAllMapped(
+            RegExp(r'\B(?=(\d{3})+(?!\d))'),
+            (match) => '.',
+          );
+
+      return '\$$formatted';
+    }
+
+    final buffer = StringBuffer();
+
+    buffer.writeln('ÍTEMS DE LA COTIZACIÓN ${quote.id}');
+    buffer.writeln();
+
+    for (var i = 0; i < quote.items.length; i++) {
+      final item = quote.items[i];
+
+      buffer.writeln('${i + 1}. ${item.description.trim()}');
+      buffer.writeln(
+        '   Cantidad: ${item.quantity} ${item.unit}',
+      );
+      buffer.writeln(
+        '   Precio unitario: ${money(item.price)}',
+      );
+      buffer.writeln(
+        '   Subtotal: ${money(item.total)}',
+      );
+      buffer.writeln();
+    }
+
+    if (quote.notes.trim().isNotEmpty) {
+      buffer.writeln('OBSERVACIONES');
+      buffer.writeln(quote.notes.trim());
+    }
+
+    return buffer.toString().trimRight();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+
+    final project = widget.existing;
+    final quote = widget.sourceQuote;
+
+    _name = TextEditingController(
+      text: project?.name ?? '',
+    );
+
+    _address = TextEditingController(
+      text: project?.address ?? quote?.address ?? '',
+    );
+
+    _description = TextEditingController(
+      text: project?.description ??
+          (quote == null ? '' : _buildQuoteDescription(quote)),
+    );
+
+    _budget = TextEditingController(
+      text: project == null || project.budget == 0
+          ? ''
+          : project.budget.round().toString(),
+    );
+
+    _clientId = project?.clientId ?? widget.sourceQuote?.clientId;
+
+    _status = project?.status ?? 'Planificación';
+
+    _startDate = project?.startDate ?? DateTime.now();
+
+    _estimatedEndDate = project?.estimatedEndDate;
+
+    _loadClients();
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _address.dispose();
+    _description.dispose();
+    _budget.dispose();
+
+    super.dispose();
+  }
+
+  Future<void> _loadClients() async {
+    final clients = await ClientRepository.getAll();
+
+    if (!mounted) return;
+
+    setState(() {
+      _clients = clients;
+
+      if (_clientId != null &&
+          !_clients.any(
+            (client) => client.id == _clientId,
+          )) {
+        _clientId = null;
+      }
+
+      _loadingClients = false;
+    });
+  }
+
+  Widget _commercialAmountCard(
+    String label,
+    double amount,
+  ) {
+    final formatted = amount.round().toString().replaceAllMapped(
+          RegExp(r'\B(?=(\d{3})+(?!\d))'),
+          (match) => '.',
+        );
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: panel,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.10),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white60,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '\$$formatted',
+            style: const TextStyle(
+              color: gold,
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final editing = widget.existing != null;
+
+    return Scaffold(
+      backgroundColor: ink,
+      appBar: AppBar(
+        backgroundColor: ink,
+        title: Text(
+          editing ? 'Editar proyecto' : 'Crear proyecto desde cotización',
+        ),
+      ),
+      body: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(30),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxWidth: 850,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    editing ? 'Información del proyecto' : 'Registrar proyecto',
+                    style: const TextStyle(
+                      fontSize: 30,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  const Text(
+                    'Registra los datos principales de la obra o proyecto.',
+                    style: TextStyle(
+                      color: Colors.white54,
+                    ),
+                  ),
+
+                  const SizedBox(height: 30),
+
+                  //
+                  // CLIENTE
+                  //
+                  const Text(
+                    'Cliente',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  if (_loadingClients)
+                    const LinearProgressIndicator()
+                  else if (_clients.isEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(
+                        16,
+                      ),
+                      decoration: BoxDecoration(
+                        color: panel,
+                        borderRadius: BorderRadius.circular(
+                          12,
+                        ),
+                      ),
+                      child: const Text(
+                        'No existen clientes registrados. '
+                        'Primero debes crear un cliente.',
+                        style: TextStyle(
+                          color: Colors.white60,
+                        ),
+                      ),
+                    )
+                  else
+                    DropdownButtonFormField<String>(
+                      initialValue: _clientId,
+                      decoration: const InputDecoration(
+                        labelText: 'Cliente *',
+                        prefixIcon: Icon(
+                          Icons.business_outlined,
+                        ),
+                      ),
+                      items: _clients
+                          .map(
+                            (client) => DropdownMenuItem<String>(
+                              value: client.id,
+                              child: Text(
+                                client.rut.isEmpty
+                                    ? client.name
+                                    : '${client.name} • ${client.rut}',
+                              ),
+                            ),
+                          )
+                          .toList(),
+                      onChanged:
+                          widget.sourceQuote != null || widget.existing != null
+                              ? null
+                              : (value) {
+                                  setState(() {
+                                    _clientId = value;
+                                  });
+                                },
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Selecciona un cliente';
+                        }
+
+                        return null;
+                      },
+                    ),
+
+                  const SizedBox(height: 28),
+
+                  //
+                  // PROYECTO
+                  //
+                  const Text(
+                    'Datos del proyecto',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  TextFormField(
+                    controller: _name,
+                    decoration: const InputDecoration(
+                      labelText: 'Nombre del proyecto *',
+                      prefixIcon: Icon(
+                        Icons.apartment_outlined,
+                      ),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Campo obligatorio';
+                      }
+
+                      return null;
+                    },
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  TextFormField(
+                    controller: _address,
+                    decoration: const InputDecoration(
+                      labelText: 'Dirección de la obra',
+                      prefixIcon: Icon(
+                        Icons.location_on_outlined,
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  TextFormField(
+                    controller: _description,
+                    maxLines: 4,
+                    decoration: const InputDecoration(
+                      labelText: 'Descripción',
+                      alignLabelWithHint: true,
+                      prefixIcon: Icon(
+                        Icons.notes_outlined,
+                      ),
+                    ),
+                  ),
+
+                  if (widget.sourceQuote != null) ...[
+                    const SizedBox(height: 28),
+                    const Text(
+                      'Información comercial',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Cotización de origen: ${widget.sourceQuote!.id}',
+                      style: const TextStyle(
+                        color: Colors.white60,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final compact = constraints.maxWidth < 600;
+
+                        final netCard = _commercialAmountCard(
+                          'Neto contratado',
+                          widget.sourceQuote!.net,
+                        );
+
+                        final totalCard = _commercialAmountCard(
+                          'Total contratado (IVA incluido)',
+                          widget.sourceQuote!.total,
+                        );
+
+                        if (compact) {
+                          return Column(
+                            children: [
+                              netCard,
+                              const SizedBox(height: 12),
+                              totalCard,
+                            ],
+                          );
+                        }
+
+                        return Row(
+                          children: [
+                            Expanded(child: netCard),
+                            const SizedBox(width: 12),
+                            Expanded(child: totalCard),
+                          ],
+                        );
+                      },
+                    ),
+                  ],
+
+                  const SizedBox(height: 28),
+
+                  //
+                  // PLANIFICACIÓN
+                  //
+                  const Text(
+                    'Planificación',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  LayoutBuilder(
+                    builder: (
+                      context,
+                      constraints,
+                    ) {
+                      final compact = constraints.maxWidth < 600;
+
+                      final start = _dateSelector(
+                        title: 'Fecha de inicio',
+                        date: _startDate,
+                        onPressed: _selectStartDate,
+                      );
+
+                      final end = _dateSelector(
+                        title: 'Fecha estimada de término',
+                        date: _estimatedEndDate,
+                        onPressed: _selectEndDate,
+                        allowClear: true,
+                      );
+
+                      if (compact) {
+                        return Column(
+                          children: [
+                            start,
+                            const SizedBox(
+                              height: 12,
+                            ),
+                            end,
+                          ],
+                        );
+                      }
+
+                      return Row(
+                        children: [
+                          Expanded(
+                            child: start,
+                          ),
+                          const SizedBox(
+                            width: 12,
+                          ),
+                          Expanded(
+                            child: end,
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  LayoutBuilder(
+                    builder: (
+                      context,
+                      constraints,
+                    ) {
+                      final compact = constraints.maxWidth < 600;
+
+                      final statusField = DropdownButtonFormField<String>(
+                        initialValue: _status,
+                        decoration: const InputDecoration(
+                          labelText: 'Estado',
+                          prefixIcon: Icon(
+                            Icons.flag_outlined,
+                          ),
+                        ),
+                        items: [
+                          'Planificación',
+                          'En ejecución',
+                          'Pausado',
+                          'Finalizado',
+                          'Cancelado',
+                        ]
+                            .map(
+                              (status) => DropdownMenuItem<String>(
+                                value: status,
+                                child: Text(
+                                  status,
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          if (value == null) {
+                            return;
+                          }
+
+                          setState(() {
+                            _status = value;
+                          });
+                        },
+                      );
+
+                      final budgetField = TextFormField(
+                        controller: _budget,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
+                        decoration: const InputDecoration(
+                          labelText: 'Presupuesto de costos',
+                          prefixText: '\$ ',
+                          prefixIcon: Icon(
+                            Icons.attach_money,
+                          ),
+                        ),
+                      );
+
+                      if (compact) {
+                        return Column(
+                          children: [
+                            statusField,
+                            const SizedBox(
+                              height: 12,
+                            ),
+                            budgetField,
+                          ],
+                        );
+                      }
+
+                      return Row(
+                        children: [
+                          Expanded(
+                            child: statusField,
+                          ),
+                          const SizedBox(
+                            width: 12,
+                          ),
+                          Expanded(
+                            child: budgetField,
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+
+                  const SizedBox(height: 32),
+
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(
+                          context,
+                        ),
+                        child: const Text(
+                          'Cancelar',
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      FilledButton.icon(
+                        onPressed: _saveProject,
+                        icon: const Icon(
+                          Icons.save_outlined,
+                        ),
+                        label: Text(
+                          editing ? 'Guardar cambios' : 'Crear proyecto',
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 30),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _dateSelector({
+    required String title,
+    required DateTime? date,
+    required VoidCallback onPressed,
+    bool allowClear = false,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 14,
+        vertical: 5,
+      ),
+      decoration: BoxDecoration(
+        border: Border.all(
+          color: Colors.white24,
+        ),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.calendar_today_outlined,
+            size: 19,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: InkWell(
+              onTap: onPressed,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  vertical: 12,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(
+                      height: 3,
+                    ),
+                    Text(
+                      date == null
+                          ? 'Sin definir'
+                          : _formatDate(
+                              date,
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (allowClear && date != null)
+            IconButton(
+              tooltip: 'Quitar fecha',
+              onPressed: () {
+                setState(() {
+                  _estimatedEndDate = null;
+                });
+              },
+              icon: const Icon(
+                Icons.close,
+                size: 18,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _selectStartDate() async {
+    final result = await showDatePicker(
+      context: context,
+      initialDate: _startDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2100),
+    );
+
+    if (result == null) return;
+
+    setState(() {
+      _startDate = result;
+
+      if (_estimatedEndDate != null &&
+          _estimatedEndDate!.isBefore(_startDate)) {
+        _estimatedEndDate = null;
+      }
+    });
+  }
+
+  Future<void> _selectEndDate() async {
+    final initial = _estimatedEndDate ??
+        _startDate.add(
+          const Duration(days: 30),
+        );
+
+    final result = await showDatePicker(
+      context: context,
+      initialDate: initial.isBefore(_startDate) ? _startDate : initial,
+      firstDate: _startDate,
+      lastDate: DateTime(2100),
+    );
+
+    if (result == null) return;
+
+    setState(() {
+      _estimatedEndDate = result;
+    });
+  }
+
+  Future<void> _saveProject() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    final existing = widget.existing;
+    final quote = widget.sourceQuote;
+
+    final name = _name.text.trim();
+    final address = _address.text.trim();
+    final description = _description.text.trim();
+
+    final budget = double.tryParse(_budget.text) ?? 0;
+
+    if (budget < 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'El presupuesto de costos no puede ser negativo.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    try {
+      Project project;
+
+      if (quote != null) {
+        // Creación exclusivamente desde cotización aprobada.
+        project = await ProjectRepository.createFromApprovedQuote(
+          quote: quote,
+          name: name,
+          startDate: _startDate,
+          estimatedEndDate: _estimatedEndDate,
+          description: description,
+          budget: budget,
+        );
+      } else if (existing != null) {
+        // Edición de un proyecto existente.
+        project = Project(
+          id: existing.id,
+          clientId: existing.clientId,
+          clientName: existing.clientName,
+          sourceQuoteId: existing.sourceQuoteId,
+          name: name,
+          address: address,
+          description: description,
+          status: _status,
+          startDate: _startDate,
+          estimatedEndDate: _estimatedEndDate,
+          contractedNet: existing.contractedNet,
+          contractedTotal: existing.contractedTotal,
+          budget: budget,
+          createdAt: existing.createdAt,
+        );
+      } else {
+        throw StateError(
+          'Para crear un proyecto debes seleccionar una cotización aprobada.',
+        );
+      }
+
+      if (!mounted) return;
+
+      Navigator.pop(context, project);
+    } catch (error) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            error is StateError
+                ? error.message.toString()
+                : 'No se pudo guardar el proyecto: $error',
+          ),
+        ),
+      );
+    }
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.day.toString().padLeft(2, '0')}/'
+        '${date.month.toString().padLeft(2, '0')}/'
+        '${date.year}';
+  }
+}
+
+========== lib/features/projects/models/project_expense.dart ==========
+
+class ProjectExpense {
+  final String id;
+  final String projectId;
+
+  final DateTime date;
+  final String category;
+  final String description;
+  final String supplier;
+
+  final double amount;
+  final DateTime createdAt;
+
+  const ProjectExpense({
+    required this.id,
+    required this.projectId,
+    required this.date,
+    required this.category,
+    required this.description,
+    this.supplier = '',
+    required this.amount,
+    required this.createdAt,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'projectId': projectId,
+        'date': date.toIso8601String(),
+        'category': category,
+        'description': description,
+        'supplier': supplier,
+        'amount': amount,
+        'createdAt': createdAt.toIso8601String(),
+      };
+
+  factory ProjectExpense.fromJson(Map<String, dynamic> json) {
+    return ProjectExpense(
+      id: json['id']?.toString() ?? '',
+      projectId: json['projectId']?.toString() ?? '',
+      date: DateTime.tryParse(
+            json['date']?.toString() ?? '',
+          ) ??
+          DateTime.now(),
+      category: json['category']?.toString() ?? 'Otros',
+      description: json['description']?.toString() ?? '',
+      supplier: json['supplier']?.toString() ?? '',
+      amount: (json['amount'] as num?)?.toDouble() ?? 0,
+      createdAt: DateTime.tryParse(
+            json['createdAt']?.toString() ?? '',
+          ) ??
+          DateTime.now(),
+    );
+  }
+}
+
+========== lib/features/projects/repositories/project_expense_repository.dart ==========
+
+import 'dart:convert';
+
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../models/project_expense.dart';
+
+class ProjectExpenseRepository {
+  static const String _storageKey = 'project_expenses';
+
+  static Future<List<ProjectExpense>> getAll() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_storageKey);
+
+    if (raw == null || raw.isEmpty) {
+      return [];
+    }
+
+    final decoded = jsonDecode(raw) as List<dynamic>;
+
+    return decoded
+        .map(
+          (item) => ProjectExpense.fromJson(
+            Map<String, dynamic>.from(item as Map),
+          ),
+        )
+        .toList();
+  }
+
+  static Future<List<ProjectExpense>> getByProject(
+    String projectId,
+  ) async {
+    final expenses = await getAll();
+
+    return expenses.where((expense) => expense.projectId == projectId).toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
+  }
+
+  static Future<void> saveAll(
+    List<ProjectExpense> expenses,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final encoded = jsonEncode(
+      expenses.map((expense) => expense.toJson()).toList(),
+    );
+
+    final saved = await prefs.setString(_storageKey, encoded);
+
+    if (!saved) {
+      throw StateError(
+        'No se pudieron guardar los gastos del proyecto.',
+      );
+    }
+  }
+
+  static void _validate(ProjectExpense expense) {
+    if (expense.id.trim().isEmpty || expense.projectId.trim().isEmpty) {
+      throw ArgumentError(
+        'El gasto debe tener un ID y un proyecto válido.',
+      );
+    }
+
+    if (expense.description.trim().isEmpty) {
+      throw ArgumentError(
+        'Debes ingresar una descripción.',
+      );
+    }
+
+    if (!expense.amount.isFinite || expense.amount <= 0) {
+      throw ArgumentError(
+        'El monto debe ser mayor que cero.',
+      );
+    }
+  }
+
+  static Future<void> add(
+    ProjectExpense expense,
+  ) async {
+    _validate(expense);
+
+    final expenses = await getAll();
+
+    if (expenses.any((item) => item.id == expense.id)) {
+      throw StateError(
+        'Ya existe un gasto con este identificador.',
+      );
+    }
+
+    expenses.add(expense);
+    await saveAll(expenses);
+  }
+
+  static Future<void> update(
+    ProjectExpense expense,
+  ) async {
+    _validate(expense);
+
+    final expenses = await getAll();
+
+    final index = expenses.indexWhere(
+      (item) => item.id == expense.id && item.projectId == expense.projectId,
+    );
+
+    if (index == -1) {
+      throw StateError(
+        'No se encontró el gasto que deseas editar.',
+      );
+    }
+
+    expenses[index] = expense;
+    await saveAll(expenses);
+  }
+
+  static Future<void> delete({
+    required String id,
+    required String projectId,
+  }) async {
+    final expenses = await getAll();
+
+    final index = expenses.indexWhere(
+      (item) => item.id == id && item.projectId == projectId,
+    );
+
+    if (index == -1) {
+      throw StateError(
+        'No se encontró el gasto que deseas eliminar.',
+      );
+    }
+
+    expenses.removeAt(index);
+    await saveAll(expenses);
+  }
+
+  static Future<double> totalByProject(
+    String projectId,
+  ) async {
+    final expenses = await getByProject(projectId);
+
+    return expenses.fold<double>(
+      0,
+      (total, expense) => total + expense.amount,
+    );
+  }
+}

@@ -1,56 +1,39 @@
-import 'dart:convert';
-
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/project_expense.dart';
 
 class ProjectExpenseRepository {
-  static const String _storageKey = 'project_expenses';
+  static SupabaseClient get _db => Supabase.instance.client;
 
-  static Future<List<ProjectExpense>> getAll() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_storageKey);
-
-    if (raw == null || raw.isEmpty) {
-      return [];
-    }
-
-    final decoded = jsonDecode(raw) as List<dynamic>;
-
-    return decoded
-        .map(
-          (item) => ProjectExpense.fromJson(
-            Map<String, dynamic>.from(item as Map),
-          ),
-        )
-        .toList();
+  static double _number(dynamic value) {
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '') ?? 0;
   }
 
-  static Future<List<ProjectExpense>> getByProject(
-    String projectId,
-  ) async {
-    final expenses = await getAll();
-
-    return expenses.where((expense) => expense.projectId == projectId).toList()
-      ..sort((a, b) => b.date.compareTo(a.date));
-  }
-
-  static Future<void> saveAll(
-    List<ProjectExpense> expenses,
-  ) async {
-    final prefs = await SharedPreferences.getInstance();
-
-    final encoded = jsonEncode(
-      expenses.map((expense) => expense.toJson()).toList(),
+  static ProjectExpense _fromRow(Map<String, dynamic> row) {
+    return ProjectExpense(
+      id: row['id']?.toString() ?? '',
+      projectId: row['project_id']?.toString() ?? '',
+      date: DateTime.parse(row['expense_date'].toString()),
+      category: row['category']?.toString() ?? 'Otros',
+      description: row['description']?.toString() ?? '',
+      supplier: row['supplier']?.toString() ?? '',
+      amount: _number(row['amount']),
+      createdAt: DateTime.parse(row['created_at'].toString()),
     );
+  }
 
-    final saved = await prefs.setString(_storageKey, encoded);
-
-    if (!saved) {
-      throw StateError(
-        'No se pudieron guardar los gastos del proyecto.',
-      );
-    }
+  static Map<String, dynamic> _toRow(ProjectExpense expense) {
+    return {
+      'id': expense.id,
+      'project_id': expense.projectId,
+      'expense_date': expense.date.toIso8601String(),
+      'category': expense.category,
+      'description': expense.description,
+      'supplier': expense.supplier,
+      'amount': expense.amount,
+      'created_at': expense.createdAt.toIso8601String(),
+    };
   }
 
   static void _validate(ProjectExpense expense) {
@@ -61,9 +44,7 @@ class ProjectExpenseRepository {
     }
 
     if (expense.description.trim().isEmpty) {
-      throw ArgumentError(
-        'Debes ingresar una descripción.',
-      );
+      throw ArgumentError('Debes ingresar una descripción.');
     }
 
     if (!expense.amount.isFinite || expense.amount <= 0) {
@@ -73,62 +54,73 @@ class ProjectExpenseRepository {
     }
   }
 
-  static Future<void> add(
-    ProjectExpense expense,
-  ) async {
-    _validate(expense);
+  static Future<List<ProjectExpense>> getAll() async {
+    final rows = await _db
+        .from('project_expenses')
+        .select()
+        .order('expense_date', ascending: false);
 
-    final expenses = await getAll();
-
-    if (expenses.any((item) => item.id == expense.id)) {
-      throw StateError(
-        'Ya existe un gasto con este identificador.',
-      );
-    }
-
-    expenses.add(expense);
-    await saveAll(expenses);
+    return rows.map((row) => _fromRow(Map<String, dynamic>.from(row))).toList();
   }
 
-  static Future<void> update(
-    ProjectExpense expense,
+  static Future<List<ProjectExpense>> getByProject(
+    String projectId,
   ) async {
+    final rows = await _db
+        .from('project_expenses')
+        .select()
+        .eq('project_id', projectId)
+        .order('expense_date', ascending: false);
+
+    return rows.map((row) => _fromRow(Map<String, dynamic>.from(row))).toList();
+  }
+
+  static Future<void> add(ProjectExpense expense) async {
     _validate(expense);
 
-    final expenses = await getAll();
+    await _db.from('project_expenses').insert(
+          _toRow(expense),
+        );
+  }
 
-    final index = expenses.indexWhere(
-      (item) => item.id == expense.id && item.projectId == expense.projectId,
-    );
+  static Future<void> update(ProjectExpense expense) async {
+    _validate(expense);
 
-    if (index == -1) {
+    final data = _toRow(expense)
+      ..remove('id')
+      ..remove('project_id')
+      ..remove('created_at');
+
+    final updated = await _db
+        .from('project_expenses')
+        .update(data)
+        .eq('id', expense.id)
+        .eq('project_id', expense.projectId)
+        .select('id');
+
+    if (updated.isEmpty) {
       throw StateError(
         'No se encontró el gasto que deseas editar.',
       );
     }
-
-    expenses[index] = expense;
-    await saveAll(expenses);
   }
 
   static Future<void> delete({
     required String id,
     required String projectId,
   }) async {
-    final expenses = await getAll();
+    final deleted = await _db
+        .from('project_expenses')
+        .delete()
+        .eq('id', id)
+        .eq('project_id', projectId)
+        .select('id');
 
-    final index = expenses.indexWhere(
-      (item) => item.id == id && item.projectId == projectId,
-    );
-
-    if (index == -1) {
+    if (deleted.isEmpty) {
       throw StateError(
         'No se encontró el gasto que deseas eliminar.',
       );
     }
-
-    expenses.removeAt(index);
-    await saveAll(expenses);
   }
 
   static Future<double> totalByProject(
@@ -140,5 +132,22 @@ class ProjectExpenseRepository {
       0,
       (total, expense) => total + expense.amount,
     );
+  }
+
+  // Compatibilidad temporal con posibles llamadas anteriores.
+  // Guarda los registros recibidos, pero no elimina los ausentes.
+  static Future<void> saveAll(
+    List<ProjectExpense> expenses,
+  ) async {
+    for (final expense in expenses) {
+      _validate(expense);
+    }
+
+    if (expenses.isEmpty) return;
+
+    await _db.from('project_expenses').upsert(
+          expenses.map(_toRow).toList(),
+          onConflict: 'id',
+        );
   }
 }

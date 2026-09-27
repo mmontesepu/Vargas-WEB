@@ -51,15 +51,7 @@ class _ProjectsPageState extends State<ProjectsPage> {
     });
   }
 
-  Future<void> _save() async {
-    await ProjectRepository.saveAll(
-      _projects,
-    );
-  }
-
-  Future<void> _edit([
-    Project? existing,
-  ]) async {
+  Future<void> _edit([Project? existing]) async {
     final result = await Navigator.push<Project>(
       context,
       MaterialPageRoute(
@@ -69,21 +61,31 @@ class _ProjectsPageState extends State<ProjectsPage> {
       ),
     );
 
-    if (result == null) return;
+    if (result == null || !mounted) return;
 
-    setState(() {
-      final index = _projects.indexWhere(
-        (project) => project.id == result.id,
+    try {
+      await ProjectRepository.save(result);
+
+      if (!mounted) return;
+
+      await _load();
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Proyecto actualizado correctamente.'),
+        ),
       );
+    } catch (error) {
+      if (!mounted) return;
 
-      if (index == -1) {
-        _projects.insert(0, result);
-      } else {
-        _projects[index] = result;
-      }
-    });
-
-    await _save();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No fue posible guardar el proyecto: $error'),
+        ),
+      );
+    }
   }
 
   @override

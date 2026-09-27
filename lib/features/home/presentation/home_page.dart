@@ -4,6 +4,18 @@ import 'package:flutter/services.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../admin/presentation/admin_access_page.dart';
 
+import '../../web_content/models/web_project.dart';
+import '../../web_content/repositories/web_project_repository.dart';
+import '../../web_content/repositories/web_project_image_repository.dart';
+import '../../web_content/presentation/public_project_detail_page.dart';
+import '../../web_content/repositories/web_service_image_repository.dart';
+
+import '../../web_content/repositories/web_site_settings_repository.dart';
+
+import '../../web_content/repositories/web_testimonial_repository.dart';
+
+import '../repositories/quote_request_repository.dart';
+
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -47,13 +59,170 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  void _openAdmin() {
+  List<WebProject> _publicProjects = [];
+  Map<String, String> _projectCoverUrls = {};
+
+  Map<String, String> _serviceImageUrls = {};
+
+  String? _heroImageUrl;
+
+  List<WebTestimonial> _publicTestimonials = [];
+  bool _loadingTestimonials = true;
+
+  bool _loadingProjects = true;
+  String? _projectsError;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _loadPublicProjects();
+    _loadServiceImages();
+    _loadHeroImage();
+    _loadTestimonials();
+  }
+
+  Future<void> _loadPublicProjects() async {
+    setState(() {
+      _loadingProjects = true;
+      _projectsError = null;
+    });
+
+    try {
+      final projects = await WebProjectRepository.getPublished();
+      final urls = <String, String>{};
+
+      for (final project in projects) {
+        final path = project.coverPath;
+
+        if (path == null || path.trim().isEmpty) continue;
+
+        urls[project.id] = await WebProjectImageRepository.signedUrl(path);
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _publicProjects = projects;
+        _projectCoverUrls = urls;
+        _loadingProjects = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+
+      setState(() {
+        _projectsError = error.toString();
+        _loadingProjects = false;
+      });
+    }
+  }
+
+  Future<void> _loadServiceImages() async {
+    try {
+      final paths = await WebServiceImageRepository.getAll();
+      final urls = <String, String>{};
+
+      for (final entry in paths.entries) {
+        final path = entry.value;
+
+        if (path == null || path.trim().isEmpty) continue;
+
+        try {
+          urls[entry.key] = await WebServiceImageRepository.signedUrl(path);
+        } catch (error) {
+          debugPrint(
+            'No fue posible cargar la imagen del servicio '
+            '${entry.key}: $error',
+          );
+        }
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _serviceImageUrls = urls;
+      });
+    } catch (error) {
+      debugPrint('No fue posible cargar las imágenes de servicios: $error');
+    }
+  }
+
+  Future<void> _loadHeroImage() async {
+    try {
+      final path = await WebSiteSettingsRepository.getHeroPath();
+
+      String? url;
+
+      if (path != null && path.trim().isNotEmpty) {
+        url = await WebSiteSettingsRepository.signedUrl(path);
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _heroImageUrl = url;
+      });
+    } catch (error) {
+      debugPrint(
+        'No fue posible cargar la fotografía principal: $error',
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _heroImageUrl = null;
+      });
+    }
+  }
+
+  Future<void> _loadTestimonials() async {
+    try {
+      final items = await WebTestimonialRepository.getPublished();
+
+      if (!mounted) return;
+
+      setState(() {
+        _publicTestimonials = items;
+        _loadingTestimonials = false;
+      });
+    } catch (error) {
+      debugPrint(
+        'No fue posible cargar los testimonios públicos: $error',
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _publicTestimonials = [];
+        _loadingTestimonials = false;
+      });
+    }
+  }
+
+  void _openPublicProject(WebProject project) {
     Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => PublicProjectDetailPage(
+          project: project,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openAdmin() async {
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => const AdminAccessPage(),
       ),
     );
+
+    if (!mounted) return;
+
+    _loadHeroImage();
+    _loadServiceImages();
+    _loadPublicProjects();
   }
 
   void _openContact() {
@@ -319,6 +488,7 @@ class _HomePageState extends State<HomePage> {
         fit: StackFit.expand,
         children: [
           _image(_heroImage),
+          //_image(_heroImageUrl ?? _heroImage),
           const DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -502,7 +672,7 @@ class _HomePageState extends State<HomePage> {
                       'Desarrollo de proyectos de construcción '
                           'con una ejecución planificada y '
                           'atención a cada etapa.',
-                      _constructionImage,
+                      _serviceImageUrls['construction'] ?? _constructionImage,
                     ),
                   ),
                   SizedBox(
@@ -512,7 +682,7 @@ class _HomePageState extends State<HomePage> {
                       'Remodelaciones',
                       'Renovamos espacios para mejorar su '
                           'funcionalidad, estética y comodidad.',
-                      _renovationImage,
+                      _serviceImageUrls['renovation'] ?? _renovationImage,
                     ),
                   ),
                   SizedBox(
@@ -522,7 +692,7 @@ class _HomePageState extends State<HomePage> {
                       'Terminaciones',
                       'Trabajos de terminación y detalles '
                           'que completan cada proyecto.',
-                      _finishesImage,
+                      _serviceImageUrls['finishes'] ?? _finishesImage,
                     ),
                   ),
                 ],
@@ -546,100 +716,215 @@ class _HomePageState extends State<HomePage> {
     return _section(
       key: _projectsKey,
       background: const Color(0xFF161819),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final mobile = constraints.maxWidth < 760;
-
-          final copy = Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _sectionHeading(
-                'Nuestro portafolio',
-                'Cada proyecto merece ser mostrado.',
-                description: 'Estamos preparando una galería de obras '
-                    'con fotografías reales, detalles de ejecución '
-                    'y resultados de los trabajos realizados.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _sectionHeading(
+            'Nuestro portafolio',
+            'Obras que reflejan nuestro trabajo.',
+            description: 'Conoce algunos de los proyectos desarrollados '
+                'por Vargas SPA Construcciones.',
+          ),
+          const SizedBox(height: 30),
+          if (_loadingProjects)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(36),
+                child: CircularProgressIndicator(),
               ),
-              const SizedBox(height: 22),
-              const Row(
+            )
+          else if (_projectsError != null)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'No fue posible cargar los proyectos.',
+                  style: TextStyle(color: Colors.white70),
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: _loadPublicProjects,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Reintentar'),
+                ),
+              ],
+            )
+          else if (_publicProjects.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(30),
+              decoration: BoxDecoration(
+                color: panel,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: _border),
+              ),
+              child: const Column(
                 children: [
                   Icon(
                     Icons.photo_library_outlined,
                     color: gold,
-                    size: 20,
+                    size: 36,
                   ),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Próximamente: proyectos reales de Vargas SPA.',
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 13,
-                      ),
+                  SizedBox(height: 12),
+                  Text(
+                    'Estamos preparando nuestro portafolio.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
                     ),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'Pronto compartiremos fotografías '
+                    'de nuestras obras.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white60),
                   ),
                 ],
               ),
-              const SizedBox(height: 24),
-              OutlinedButton.icon(
-                onPressed: _openContact,
-                icon: const Icon(Icons.chat_bubble_outline),
-                label: const Text('Conversemos sobre tu proyecto'),
-              ),
-            ],
-          );
+            )
+          else
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final columns = constraints.maxWidth >= 1000
+                    ? 3
+                    : constraints.maxWidth >= 650
+                        ? 2
+                        : 1;
 
-          final photo = ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: Stack(
-              children: [
-                _image(_constructionImage, height: mobile ? 260 : 380),
-                const Positioned(
-                  left: 12,
-                  bottom: 12,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: Color(0xE5101214),
-                      borderRadius: BorderRadius.all(
-                        Radius.circular(5),
+                const spacing = 16.0;
+
+                final cardWidth =
+                    (constraints.maxWidth - spacing * (columns - 1)) / columns;
+
+                return Wrap(
+                  spacing: spacing,
+                  runSpacing: spacing,
+                  children: [
+                    for (final project in _publicProjects)
+                      SizedBox(
+                        width: cardWidth,
+                        child: _publicProjectCard(project),
                       ),
-                    ),
-                    child: Padding(
-                      padding: EdgeInsets.all(8),
-                      child: Text(
-                        'Imagen referencial · Portafolio en preparación',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: Colors.white70,
+                  ],
+                );
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _publicProjectCard(WebProject project) {
+    final url = _projectCoverUrls[project.id];
+
+    return Material(
+      color: panel,
+      borderRadius: BorderRadius.circular(12),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => _openPublicProject(project),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AspectRatio(
+              aspectRatio: 16 / 10,
+              child: url == null
+                  ? const Center(
+                      child: Icon(
+                        Icons.image_outlined,
+                        color: gold,
+                        size: 44,
+                      ),
+                    )
+                  : Image.network(
+                      url,
+                      fit: BoxFit.cover,
+                      errorBuilder: (
+                        context,
+                        error,
+                        stackTrace,
+                      ) =>
+                          const Center(
+                        child: Icon(
+                          Icons.broken_image_outlined,
+                          color: gold,
+                          size: 40,
                         ),
                       ),
                     ),
-                  ),
-                ),
-              ],
             ),
-          );
-
-          if (mobile) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                copy,
-                const SizedBox(height: 26),
-                photo,
-              ],
-            );
-          }
-
-          return Row(
-            children: [
-              Expanded(child: copy),
-              const SizedBox(width: 45),
-              Expanded(child: photo),
-            ],
-          );
-        },
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    project.category.toUpperCase(),
+                    style: const TextStyle(
+                      color: gold,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 9),
+                  Text(
+                    project.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  if (project.location.trim().isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.location_on_outlined,
+                          size: 16,
+                          color: Colors.white54,
+                        ),
+                        const SizedBox(width: 5),
+                        Expanded(
+                          child: Text(
+                            project.location,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white60,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 18),
+                  const Row(
+                    children: [
+                      Text(
+                        'Ver proyecto',
+                        style: TextStyle(
+                          color: gold,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      SizedBox(width: 8),
+                      Icon(
+                        Icons.arrow_forward,
+                        color: gold,
+                        size: 17,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -738,56 +1023,157 @@ class _HomePageState extends State<HomePage> {
   Widget _testimonials() {
     return _section(
       key: _testimonialsKey,
-      background: const Color(0xFF161819),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _sectionHeading(
             'Experiencias de clientes',
             'La confianza se construye con resultados.',
-            description: 'Próximamente compartiremos experiencias '
-                'y opiniones de clientes que autoricen '
-                'la publicación de sus testimonios.',
+            description: 'Conoce las experiencias compartidas '
+                'por clientes de Vargas SPA.',
           ),
-          const SizedBox(height: 25),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(26),
-            decoration: BoxDecoration(
-              color: panel,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _border),
-            ),
-            child: const Column(
-              children: [
-                Icon(
-                  Icons.format_quote_rounded,
+          const SizedBox(height: 30),
+          if (_loadingTestimonials)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(36),
+                child: CircularProgressIndicator(
                   color: gold,
-                  size: 38,
                 ),
-                SizedBox(height: 10),
-                Text(
-                  'Historias reales, proyectos reales.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
+              ),
+            )
+          else if (_publicTestimonials.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(30),
+              decoration: BoxDecoration(
+                color: panel,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: _border),
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.format_quote,
+                    color: gold,
+                    size: 36,
                   ),
-                ),
-                SizedBox(height: 9),
-                Text(
-                  'Este espacio se habilitará con testimonios '
-                  'verificados y autorizados por nuestros clientes.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: _muted,
-                    fontSize: 13,
-                    height: 1.6,
+                  SizedBox(height: 14),
+                  Text(
+                    'Historias reales, proyectos reales.',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
+                  SizedBox(height: 10),
+                  Text(
+                    'Próximamente compartiremos experiencias '
+                    'y opiniones de clientes que autoricen '
+                    'la publicación de sus testimonios.',
+                    style: TextStyle(
+                      color: Colors.white60,
+                      height: 1.6,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            LayoutBuilder(
+              builder: (context, constraints) {
+                const spacing = 16.0;
+
+                final columns = constraints.maxWidth >= 950
+                    ? 3
+                    : constraints.maxWidth >= 600
+                        ? 2
+                        : 1;
+
+                final cardWidth =
+                    (constraints.maxWidth - spacing * (columns - 1)) / columns;
+
+                return Wrap(
+                  spacing: spacing,
+                  runSpacing: spacing,
+                  children: [
+                    for (final item in _publicTestimonials)
+                      SizedBox(
+                        width: cardWidth,
+                        child: _testimonialCard(item),
+                      ),
+                  ],
+                );
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _testimonialCard(WebTestimonial item) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: panel,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.format_quote,
+            color: gold,
+            size: 34,
+          ),
+          if (item.rating != null) ...[
+            const SizedBox(height: 10),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: List.generate(
+                5,
+                (index) => Icon(
+                  index < item.rating!
+                      ? Icons.star_rounded
+                      : Icons.star_border_rounded,
+                  color: gold,
+                  size: 20,
                 ),
-              ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 18),
+          Text(
+            '“${item.testimonial}”',
+            style: const TextStyle(
+              fontSize: 15,
+              color: Colors.white70,
+              height: 1.7,
             ),
           ),
+          const SizedBox(height: 24),
+          const Divider(color: Colors.white12),
+          const SizedBox(height: 14),
+          Text(
+            item.customerName,
+            style: const TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: 15,
+            ),
+          ),
+          if (item.customerRole != null &&
+              item.customerRole!.trim().isNotEmpty) ...[
+            const SizedBox(height: 5),
+            Text(
+              item.customerRole!,
+              style: const TextStyle(
+                color: Colors.white54,
+                fontSize: 12,
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -952,8 +1338,8 @@ class _ContactDialogState extends State<_ContactDialog> {
   final _phoneController = TextEditingController();
   final _emailController = TextEditingController();
   final _messageController = TextEditingController();
-
   String _service = 'Construcción';
+  bool _sending = false;
 
   @override
   void dispose() {
@@ -964,36 +1350,57 @@ class _ContactDialogState extends State<_ContactDialog> {
     super.dispose();
   }
 
-  Future<void> _copyRequest() async {
+  Future<void> _sendRequest() async {
+    if (_sending) return;
+
     if (!_formKey.currentState!.validate()) return;
 
-    final message = '''
-SOLICITUD DE COTIZACIÓN - VARGAS SPA
+    setState(() {
+      _sending = true;
+    });
 
-Nombre: ${_nameController.text.trim()}
-Teléfono: ${_phoneController.text.trim()}
-Correo: ${_emailController.text.trim()}
-Servicio: $_service
+    try {
+      final result = await QuoteRequestRepository.send(
+        name: _nameController.text,
+        phone: _phoneController.text,
+        email: _emailController.text,
+        service: _service,
+        message: _messageController.text,
+      );
 
-Descripción del proyecto:
-${_messageController.text.trim()}
-''';
+      if (!mounted) return;
 
-    await Clipboard.setData(
-      ClipboardData(text: message),
-    );
+      Navigator.pop(context);
 
-    if (!mounted) return;
-
-    Navigator.pop(context);
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Solicitud copiada. Puedes enviarla por tu canal de contacto preferido.',
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 6),
+          content: Text(result.message),
         ),
-      ),
-    );
+      );
+    } catch (error) {
+      if (!mounted) return;
+
+      String errorMessage =
+          'No fue posible enviar la cotización. Inténtalo nuevamente.';
+
+      if (error is StateError) {
+        errorMessage = error.message;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 6),
+          content: Text(errorMessage),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _sending = false;
+        });
+      }
+    }
   }
 
   @override
@@ -1009,8 +1416,8 @@ ${_messageController.text.trim()}
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Text(
-                  'Completa tus datos para preparar una solicitud. '
-                  'Por ahora no se enviará automáticamente.',
+                  'Completa tus datos y enviaremos tu solicitud '
+                  'directamente a Vargas SPA.',
                   style: TextStyle(
                     color: Colors.white60,
                     fontSize: 12,
@@ -1107,13 +1514,23 @@ ${_messageController.text.trim()}
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context),
+          onPressed: _sending ? null : () => Navigator.pop(context),
           child: const Text('Cancelar'),
         ),
         FilledButton.icon(
-          onPressed: _copyRequest,
-          icon: const Icon(Icons.copy_outlined),
-          label: const Text('Copiar solicitud'),
+          onPressed: _sending ? null : _sendRequest,
+          icon: _sending
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                  ),
+                )
+              : const Icon(Icons.send_outlined),
+          label: Text(
+            _sending ? 'Enviando...' : 'Enviar cotización',
+          ),
         ),
       ],
     );

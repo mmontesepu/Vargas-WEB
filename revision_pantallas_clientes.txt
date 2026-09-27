@@ -1,3 +1,9 @@
+﻿
+
+========================================
+ARCHIVO: lib/features/clients/presentation/clients_page.dart
+========================================
+
 import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_theme.dart';
@@ -39,7 +45,9 @@ class _ClientsPageState extends State<ClientsPage> {
     await ClientRepository.saveAll(_clients);
   }
 
-  Future<void> _edit([Client? existing]) async {
+  Future<void> _edit([
+    Client? existing,
+  ]) async {
     final result = await Navigator.push<Client>(
       context,
       MaterialPageRoute(
@@ -49,89 +57,21 @@ class _ClientsPageState extends State<ClientsPage> {
       ),
     );
 
-    if (result == null || !mounted) return;
+    if (result == null) return;
 
-    try {
-      await ClientRepository.saveAll([result]);
-
-      if (!mounted) return;
-
-      await _load();
-
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            existing == null
-                ? 'Cliente creado correctamente.'
-                : 'Cliente actualizado correctamente.',
-          ),
-        ),
+    setState(() {
+      final index = _clients.indexWhere(
+        (client) => client.id == result.id,
       );
-    } catch (error) {
-      if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'No fue posible guardar el cliente en Supabase.',
-          ),
-        ),
-      );
-    }
-  }
+      if (index == -1) {
+        _clients.insert(0, result);
+      } else {
+        _clients[index] = result;
+      }
+    });
 
-  Future<void> _deleteClient(Client client) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Eliminar cliente'),
-        content: Text(
-          '¿Deseas eliminar a "${client.name}"? '
-          'Esta acción no se puede deshacer.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Eliminar'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true || !mounted) return;
-
-    try {
-      await ClientRepository.delete(client.id);
-
-      if (!mounted) return;
-
-      await _load();
-
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Cliente eliminado correctamente.'),
-        ),
-      );
-    } catch (error) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'No fue posible eliminar el cliente. '
-            'Verifica si tiene cotizaciones u obras asociadas.',
-          ),
-        ),
-      );
-    }
+    await _save();
   }
 
   @override
@@ -164,7 +104,7 @@ class _ClientsPageState extends State<ClientsPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Gestión de clientes',
+                          'GestiÃ³n de clientes',
                           style: TextStyle(
                             fontSize: 30,
                             fontWeight: FontWeight.bold,
@@ -216,7 +156,7 @@ class _ClientsPageState extends State<ClientsPage> {
                   });
                 },
                 decoration: const InputDecoration(
-                  hintText: 'Buscar por nombre, RUT, correo o teléfono...',
+                  hintText: 'Buscar por nombre, RUT, correo o telÃ©fono...',
                   prefixIcon: Icon(Icons.search),
                 ),
               ),
@@ -388,14 +328,6 @@ class _ClientsPageState extends State<ClientsPage> {
                 Icons.edit_outlined,
               ),
             ),
-            IconButton(
-              tooltip: 'Eliminar cliente',
-              onPressed: () => _deleteClient(client),
-              icon: const Icon(
-                Icons.delete_outline,
-                color: Colors.redAccent,
-              ),
-            ),
           ],
         ),
       ),
@@ -421,7 +353,7 @@ class _ClientsPageState extends State<ClientsPage> {
           ),
           const SizedBox(height: 16),
           const Text(
-            'Aún no tienes clientes registrados',
+            'AÃºn no tienes clientes registrados',
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,
@@ -461,5 +393,246 @@ class _ClientsPageState extends State<ClientsPage> {
     }
 
     return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+  }
+}
+
+========================================
+ARCHIVO: lib/features/clients/presentation/client_editor_page.dart
+========================================
+
+import 'package:flutter/material.dart';
+
+import '../../../app/theme/app_theme.dart';
+import '../models/client.dart';
+
+class ClientEditorPage extends StatefulWidget {
+  final Client? existing;
+
+  const ClientEditorPage({
+    super.key,
+    this.existing,
+  });
+
+  @override
+  State<ClientEditorPage> createState() => _ClientEditorPageState();
+}
+
+class _ClientEditorPageState extends State<ClientEditorPage> {
+  final _formKey = GlobalKey<FormState>();
+
+  late final TextEditingController _name;
+  late final TextEditingController _rut;
+  late final TextEditingController _email;
+  late final TextEditingController _phone;
+  late final TextEditingController _address;
+  late final TextEditingController _notes;
+
+  @override
+  void initState() {
+    super.initState();
+
+    final client = widget.existing;
+
+    _name = TextEditingController(
+      text: client?.name ?? '',
+    );
+
+    _rut = TextEditingController(
+      text: client?.rut ?? '',
+    );
+
+    _email = TextEditingController(
+      text: client?.email ?? '',
+    );
+
+    _phone = TextEditingController(
+      text: client?.phone ?? '',
+    );
+
+    _address = TextEditingController(
+      text: client?.address ?? '',
+    );
+
+    _notes = TextEditingController(
+      text: client?.notes ?? '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _rut.dispose();
+    _email.dispose();
+    _phone.dispose();
+    _address.dispose();
+    _notes.dispose();
+
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final editing = widget.existing != null;
+
+    return Scaffold(
+      backgroundColor: ink,
+      appBar: AppBar(
+        backgroundColor: ink,
+        title: Text(
+          editing ? 'Editar cliente' : 'Nuevo cliente',
+        ),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(30),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              maxWidth: 750,
+            ),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    editing ? 'InformaciÃ³n del cliente' : 'Registrar cliente',
+                    style: const TextStyle(
+                      fontSize: 30,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'MantÃ©n actualizados los datos comerciales y de contacto.',
+                    style: TextStyle(
+                      color: Colors.white54,
+                    ),
+                  ),
+                  const SizedBox(height: 30),
+                  _field(
+                    controller: _name,
+                    label: 'Nombre / RazÃ³n social',
+                    icon: Icons.business_outlined,
+                    required: true,
+                  ),
+                  const SizedBox(height: 16),
+                  _field(
+                    controller: _rut,
+                    label: 'RUT',
+                    icon: Icons.badge_outlined,
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _field(
+                          controller: _email,
+                          label: 'Correo electrÃ³nico',
+                          icon: Icons.email_outlined,
+                          keyboardType: TextInputType.emailAddress,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _field(
+                          controller: _phone,
+                          label: 'TelÃ©fono',
+                          icon: Icons.phone_outlined,
+                          keyboardType: TextInputType.phone,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  _field(
+                    controller: _address,
+                    label: 'DirecciÃ³n',
+                    icon: Icons.location_on_outlined,
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _notes,
+                    maxLines: 4,
+                    decoration: const InputDecoration(
+                      labelText: 'Observaciones',
+                      alignLabelWithHint: true,
+                      prefixIcon: Icon(Icons.notes_outlined),
+                    ),
+                  ),
+                  const SizedBox(height: 30),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Cancelar'),
+                      ),
+                      const SizedBox(width: 12),
+                      FilledButton.icon(
+                        onPressed: _save,
+                        icon: const Icon(Icons.save_outlined),
+                        label: Text(
+                          editing ? 'Guardar cambios' : 'Crear cliente',
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _field({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    bool required = false,
+    TextInputType? keyboardType,
+  }) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: keyboardType,
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon),
+      ),
+      validator: required
+          ? (value) {
+              if (value == null || value.trim().isEmpty) {
+                return 'Campo obligatorio';
+              }
+
+              return null;
+            }
+          : null,
+    );
+  }
+
+  void _save() {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    final now = DateTime.now();
+
+    final client = Client(
+      id: widget.existing?.id ?? 'CLI-${now.microsecondsSinceEpoch}',
+      name: _name.text.trim(),
+      rut: _rut.text.trim(),
+      email: _email.text.trim(),
+      phone: _phone.text.trim(),
+      address: _address.text.trim(),
+      notes: _notes.text.trim(),
+      createdAt: widget.existing?.createdAt ?? now,
+    );
+
+    Navigator.pop(
+      context,
+      client,
+    );
   }
 }

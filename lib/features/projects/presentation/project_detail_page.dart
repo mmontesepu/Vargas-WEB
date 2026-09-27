@@ -5,6 +5,8 @@ import '../models/project.dart';
 import '../models/project_expense.dart';
 import '../repositories/project_expense_repository.dart';
 
+import '../../../core/formatters/clp_input_formatter.dart';
+
 class ProjectDetailPage extends StatefulWidget {
   final Project project;
 
@@ -980,7 +982,11 @@ class _ExpenseDialogState extends State<_ExpenseDialog> {
     if (expense != null) {
       _descriptionController.text = expense.description;
       _supplierController.text = expense.supplier;
-      _amountController.text = expense.amount.round().toString();
+
+      _amountController.text = ClpInputFormatter.format(
+        expense.amount.round().toString(),
+      );
+
       _category = expense.category;
       _selectedDate = expense.date;
     }
@@ -1007,9 +1013,7 @@ class _ExpenseDialogState extends State<_ExpenseDialog> {
       _saving = true;
     });
 
-    final amount = double.parse(
-      _amountController.text.trim().replaceAll('.', ''),
-    );
+    final amount = ClpInputFormatter.parse(_amountController.text);
 
     final existing = widget.existing;
 
@@ -1126,16 +1130,17 @@ class _ExpenseDialogState extends State<_ExpenseDialog> {
                   controller: _amountController,
                   enabled: !_saving,
                   keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    const ClpInputFormatter(),
+                  ],
                   decoration: const InputDecoration(
                     labelText: 'Monto del costo',
                     prefixText: '\$ ',
                   ),
                   validator: (value) {
-                    final normalized = (value ?? '').trim().replaceAll('.', '');
+                    final amount = ClpInputFormatter.parse(value ?? '');
 
-                    final amount = double.tryParse(normalized);
-
-                    if (amount == null || !amount.isFinite || amount <= 0) {
+                    if (!amount.isFinite || amount <= 0) {
                       return 'Ingresa un monto válido';
                     }
 

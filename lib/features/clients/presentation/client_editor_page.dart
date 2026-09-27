@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../../../app/theme/app_theme.dart';
 import '../models/client.dart';
 
+import 'package:flutter/services.dart';
+
 class ClientEditorPage extends StatefulWidget {
   final Client? existing;
 
@@ -36,7 +38,7 @@ class _ClientEditorPageState extends State<ClientEditorPage> {
     );
 
     _rut = TextEditingController(
-      text: client?.rut ?? '',
+      text: formatChileanRut(client?.rut ?? ''),
     );
 
     _email = TextEditingController(
@@ -44,7 +46,7 @@ class _ClientEditorPageState extends State<ClientEditorPage> {
     );
 
     _phone = TextEditingController(
-      text: client?.phone ?? '',
+      text: formatChileanMobile(client?.phone ?? ''),
     );
 
     _address = TextEditingController(
@@ -114,10 +116,38 @@ class _ClientEditorPageState extends State<ClientEditorPage> {
                     required: true,
                   ),
                   const SizedBox(height: 16),
-                  _field(
+                  TextFormField(
                     controller: _rut,
-                    label: 'RUT',
-                    icon: Icons.badge_outlined,
+                    keyboardType: TextInputType.text,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      labelText: 'RUT (opcional)',
+                      hintText: '12.345.678-5',
+                      prefixIcon: Icon(Icons.badge_outlined),
+                    ),
+                    inputFormatters: [
+                      TextInputFormatter.withFunction((oldValue, newValue) {
+                        final formatted = formatChileanRut(newValue.text);
+
+                        return TextEditingValue(
+                          text: formatted,
+                          selection: TextSelection.collapsed(
+                            offset: formatted.length,
+                          ),
+                        );
+                      }),
+                    ],
+                    validator: (value) {
+                      final rut = value?.trim() ?? '';
+
+                      if (rut.isEmpty) return null;
+
+                      if (!isValidChileanRut(rut)) {
+                        return 'Ingresa un RUT chileno válido';
+                      }
+
+                      return null;
+                    },
                   ),
                   const SizedBox(height: 16),
                   Row(
@@ -132,11 +162,40 @@ class _ClientEditorPageState extends State<ClientEditorPage> {
                       ),
                       const SizedBox(width: 16),
                       Expanded(
-                        child: _field(
+                        child: TextFormField(
                           controller: _phone,
-                          label: 'Teléfono',
-                          icon: Icons.phone_outlined,
                           keyboardType: TextInputType.phone,
+                          decoration: const InputDecoration(
+                            labelText: 'Celular',
+                            hintText: '+56 9 1234 5678',
+                            prefixIcon: Icon(Icons.phone_outlined),
+                          ),
+                          inputFormatters: [
+                            TextInputFormatter.withFunction(
+                                (oldValue, newValue) {
+                              final formatted =
+                                  formatChileanMobile(newValue.text);
+
+                              return TextEditingValue(
+                                text: formatted,
+                                selection: TextSelection.collapsed(
+                                  offset: formatted.length,
+                                ),
+                              );
+                            }),
+                          ],
+                          validator: (value) {
+                            final phone = value?.trim() ?? '';
+
+                            if (phone.isEmpty) return null;
+
+                            if (!RegExp(r'^\+56 9 \d{4} \d{4}$')
+                                .hasMatch(phone)) {
+                              return 'Ingresa un celular válido: +56 9 1234 5678';
+                            }
+
+                            return null;
+                          },
                         ),
                       ),
                     ],
@@ -232,5 +291,87 @@ class _ClientEditorPageState extends State<ClientEditorPage> {
       context,
       client,
     );
+  }
+
+  String formatChileanRut(String input) {
+    final clean = input.toUpperCase().replaceAll(
+          RegExp(r'[^0-9K]'),
+          '',
+        );
+
+    if (clean.isEmpty) return '';
+
+    final limited = clean.length > 9 ? clean.substring(0, 9) : clean;
+
+    if (limited.length == 1) return limited;
+
+    final body = limited.substring(0, limited.length - 1);
+    final dv = limited.substring(limited.length - 1);
+
+    final formattedBody = body.replaceAllMapped(
+      RegExp(r'\B(?=(\d{3})+(?!\d))'),
+      (match) => '.',
+    );
+
+    return '$formattedBody-$dv';
+  }
+
+  bool isValidChileanRut(String input) {
+    final clean = input.toUpperCase().replaceAll(
+          RegExp(r'[^0-9K]'),
+          '',
+        );
+
+    if (clean.length < 2 || clean.length > 9) return false;
+
+    final body = clean.substring(0, clean.length - 1);
+    final dv = clean.substring(clean.length - 1);
+
+    if (!RegExp(r'^\d+$').hasMatch(body)) return false;
+
+    var sum = 0;
+    var multiplier = 2;
+
+    for (var i = body.length - 1; i >= 0; i--) {
+      sum += int.parse(body[i]) * multiplier;
+      multiplier = multiplier == 7 ? 2 : multiplier + 1;
+    }
+
+    final remainder = 11 - (sum % 11);
+
+    final expectedDv = remainder == 11
+        ? '0'
+        : remainder == 10
+            ? 'K'
+            : remainder.toString();
+
+    return dv == expectedDv;
+  }
+
+  String formatChileanMobile(String input) {
+    var digits = input.replaceAll(RegExp(r'\D'), '');
+
+    if (digits.startsWith('56')) {
+      digits = digits.substring(2);
+    }
+
+    if (digits.startsWith('9')) {
+      digits = digits.substring(1);
+    }
+
+    if (digits.length > 8) {
+      digits = digits.substring(0, 8);
+    }
+
+    if (digits.isEmpty) {
+      return input.trim().isEmpty ? '' : '+56 9';
+    }
+
+    if (digits.length <= 4) {
+      return '+56 9 $digits';
+    }
+
+    return '+56 9 ${digits.substring(0, 4)} '
+        '${digits.substring(4)}';
   }
 }
