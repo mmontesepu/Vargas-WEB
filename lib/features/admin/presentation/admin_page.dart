@@ -22,6 +22,8 @@ import '../../web_content/presentation/web_testimonials_page.dart';
 
 import '../widgets/admin_dashboard.dart';
 
+import 'admin_users_page.dart';
+
 class AdminPage extends StatefulWidget {
   const AdminPage({super.key});
 
@@ -109,6 +111,9 @@ class _AdminPageState extends State<AdminPage> {
       child: SafeArea(
         child: Column(
           children: [
+            // =====================================================
+            // LOGO Y ENCABEZADO
+            // =====================================================
             Padding(
               padding: const EdgeInsets.all(24),
               child: Row(
@@ -144,7 +149,12 @@ class _AdminPageState extends State<AdminPage> {
                 ],
               ),
             ),
+
             const Divider(height: 1),
+
+            // =====================================================
+            // MENÚ PRINCIPAL
+            // =====================================================
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.symmetric(vertical: 16),
@@ -155,27 +165,35 @@ class _AdminPageState extends State<AdminPage> {
                     selectedIcon: Icons.dashboard,
                     label: 'Dashboard',
                   ),
+
                   _menuItem(
                     index: 1,
                     icon: Icons.description_outlined,
                     selectedIcon: Icons.description,
                     label: 'Cotizaciones',
                   ),
+
                   _menuItem(
                     index: 2,
                     icon: Icons.people_outline,
                     selectedIcon: Icons.people,
                     label: 'Clientes',
                   ),
+
                   _menuItem(
                     index: 3,
                     icon: Icons.apartment_outlined,
                     selectedIcon: Icons.apartment,
                     label: 'Obras / Proyectos',
                   ),
+
                   const SizedBox(height: 12),
                   const Divider(height: 1),
                   const SizedBox(height: 12),
+
+                  // =================================================
+                  // CONTENIDO WEB - MENÚ DESPLEGABLE
+                  // =================================================
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     child: Material(
@@ -225,6 +243,8 @@ class _AdminPageState extends State<AdminPage> {
                       ),
                     ),
                   ),
+
+                  // SUBMENÚ CONTENIDO WEB
                   if (_webMenuExpanded) ...[
                     const SizedBox(height: 4),
                     _menuItem(
@@ -256,11 +276,30 @@ class _AdminPageState extends State<AdminPage> {
                       nested: true,
                     ),
                   ],
+
+                  const SizedBox(height: 12),
+                  const Divider(height: 1),
+                  const SizedBox(height: 12),
+
+                  // =================================================
+                  // ADMINISTRACIÓN DE USUARIOS
+                  // =================================================
+                  _menuItem(
+                    index: 8,
+                    icon: Icons.manage_accounts_outlined,
+                    selectedIcon: Icons.manage_accounts,
+                    label: 'Usuarios y accesos',
+                  ),
                 ],
               ),
             ),
+
+            // =====================================================
+            // VOLVER AL SITIO WEB
+            // =====================================================
             const Divider(height: 1),
             const SizedBox(height: 12),
+
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: ListTile(
@@ -278,6 +317,7 @@ class _AdminPageState extends State<AdminPage> {
                 onTap: () => Navigator.pop(context),
               ),
             ),
+
             const SizedBox(height: 16),
           ],
         ),
@@ -428,6 +468,9 @@ class _AdminPageState extends State<AdminPage> {
       case 7:
         return 'Contenido web / Testimonios';
 
+      case 8:
+        return 'Usuarios y accesos';
+
       default:
         return 'Dashboard';
     }
@@ -459,6 +502,9 @@ class _AdminPageState extends State<AdminPage> {
 
       case 7:
         return const WebTestimonialsPage();
+
+      case 8:
+        return const AdminUsersPage();
 
       default:
         return _buildDashboard();
