@@ -1,4 +1,3 @@
-
 class WebProject {
   final String id;
   final String? internalProjectId;

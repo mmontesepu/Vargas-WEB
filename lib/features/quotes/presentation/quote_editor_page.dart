@@ -39,28 +39,18 @@ class _QuoteEditorState extends State<QuoteEditor> {
   late final TextEditingController address;
   late final TextEditingController notes;
   late final TextEditingController payment;
+  late final TextEditingController netAmount;
 
   late List<QuoteItem> items;
   late String status;
 
-  // ============================================================
-  // CLIENTES
-  // ============================================================
-
   List<Client> clients = [];
-
-  String? selectedClientId;
-
-  bool loadingClients = true;
-
-  // ============================================================
-  // PROYECTOS
-  // ============================================================
-
   List<Project> projects = [];
 
+  String? selectedClientId;
   String? selectedProjectId;
 
+  bool loadingClients = true;
   bool loadingProjects = true;
 
   @override
@@ -69,98 +59,99 @@ class _QuoteEditorState extends State<QuoteEditor> {
 
     final q = widget.existing;
 
-    client = TextEditingController(
-      text: q?.client ?? '',
-    );
+    client = TextEditingController(text: q?.client ?? '');
+    email = TextEditingController(text: q?.email ?? '');
+    address = TextEditingController(text: q?.address ?? '');
+    notes = TextEditingController(text: q?.notes ?? '');
+    payment = TextEditingController(text: q?.payment ?? '');
 
-    email = TextEditingController(
-      text: q?.email ?? '',
-    );
-
-    address = TextEditingController(
-      text: q?.address ?? '',
-    );
-
-    notes = TextEditingController(
-      text: q?.notes ?? '',
-    );
-
-    payment = TextEditingController(
-      text: q?.payment ?? '',
+    netAmount = TextEditingController(
+      text: q == null ? '' : _digits(q.net),
     );
 
     selectedClientId = q?.clientId.isNotEmpty == true ? q!.clientId : null;
 
     selectedProjectId = q?.projectId.isNotEmpty == true ? q!.projectId : null;
 
-    items = q?.items
-            .map(
-              (item) => QuoteItem(
-                item.description,
-                item.unit,
-                item.quantity,
-                item.price,
-              ),
-            )
-            .toList() ??
-        [
-          QuoteItem(
-            '',
-            'GL',
-            1,
-            0,
-          ),
-        ];
+    items = q == null
+        ? [QuoteItem.partida()]
+        : q.items.map((item) => item.copy()).toList();
+
+    if (items.isEmpty) {
+      items.add(QuoteItem.partida());
+    }
 
     status = q?.status ?? 'Borrador';
 
     _loadData();
   }
 
+  String _digits(num value) {
+    return value.round().toString();
+  }
+
+  double get _net {
+    return double.tryParse(
+          netAmount.text.replaceAll('.', '').trim(),
+        ) ??
+        0;
+  }
+
+  double get _vat => (_net * 0.19).roundToDouble();
+
+  double get _total => _net + _vat;
+
   Future<void> _loadData() async {
-    final clientResult = await ClientRepository.getAll();
+    try {
+      final results = await Future.wait<dynamic>([
+        ClientRepository.getAll(),
+        ProjectRepository.getAll(),
+      ]);
 
-    final projectResult = await ProjectRepository.getAll();
+      if (!mounted) return;
 
-    if (!mounted) return;
+      setState(() {
+        clients = results[0] as List<Client>;
+        projects = results[1] as List<Project>;
 
-    setState(() {
-      clients = clientResult;
-      projects = projectResult;
+        if (selectedClientId != null &&
+            !clients.any((c) => c.id == selectedClientId)) {
+          selectedClientId = null;
+        }
 
-      // Validamos cliente existente.
-      if (selectedClientId != null &&
-          !clients.any(
-            (item) => item.id == selectedClientId,
-          )) {
-        selectedClientId = null;
-      }
-
-      // Validamos proyecto existente.
-      if (selectedProjectId != null &&
-          !projects.any(
-            (item) => item.id == selectedProjectId,
-          )) {
-        selectedProjectId = null;
-      }
-
-      // Si existe proyecto pero no corresponde
-      // al cliente seleccionado, lo quitamos.
-      if (selectedProjectId != null && selectedClientId != null) {
-        final validProject = projects.any(
-          (project) =>
-              project.id == selectedProjectId &&
-              project.clientId == selectedClientId,
-        );
-
-        if (!validProject) {
+        if (selectedProjectId != null &&
+            !projects.any((p) => p.id == selectedProjectId)) {
           selectedProjectId = null;
         }
-      }
 
-      loadingClients = false;
-      loadingProjects = false;
-    });
+        if (selectedClientId != null &&
+            selectedProjectId != null &&
+            !projects.any(
+              (p) =>
+                  p.id == selectedProjectId && p.clientId == selectedClientId,
+            )) {
+          selectedProjectId = null;
+        }
+
+        loadingClients = false;
+        loadingProjects = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+
+      setState(() {
+        loadingClients = false;
+        loadingProjects = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'No fue posible cargar clientes y proyectos: $error',
+          ),
+        ),
+      );
+    }
   }
 
   @override
@@ -170,47 +161,224 @@ class _QuoteEditorState extends State<QuoteEditor> {
     address.dispose();
     notes.dispose();
     payment.dispose();
-
+    netAmount.dispose();
     super.dispose();
   }
 
-  // ============================================================
-  // CAMPOS
-  // ============================================================
-
-  Widget field(
+  Widget _field(
     String label,
     TextEditingController controller, {
     bool required = false,
+    int maxLines = 1,
   }) {
     return TextFormField(
       controller: controller,
-      decoration: InputDecoration(
-        labelText: label,
-      ),
+      maxLines: maxLines,
+      decoration: InputDecoration(labelText: label),
       validator: required
           ? (value) {
               if (value == null || value.trim().isEmpty) {
                 return 'Campo obligatorio';
               }
-
               return null;
             }
           : null,
     );
   }
 
-  // ============================================================
-  // BUILD
-  // ============================================================
+  Widget _heading(String title, String subtitle) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            fontSize: 23,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          subtitle,
+          style: const TextStyle(
+            color: Colors.white60,
+            fontSize: 13,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _informationBox(String message) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: panel,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.info_outline, color: gold),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(color: Colors.white70),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _addPartida() {
+    setState(() {
+      items.add(QuoteItem.partida());
+    });
+  }
+
+  void _removePartida(int index) {
+    if (items.length <= 1) return;
+
+    setState(() {
+      items.removeAt(index);
+    });
+  }
+
+  void _addActivity(QuoteItem item) {
+    setState(() {
+      item.activities.add('');
+    });
+  }
+
+  void _removeActivity(QuoteItem item, int index) {
+    setState(() {
+      item.activities.removeAt(index);
+    });
+  }
+
+  Widget _partidaCard(QuoteItem item, int index) {
+    return Card(
+      key: ObjectKey(item),
+      margin: const EdgeInsets.only(bottom: 16),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Partida ${index + 1}',
+                    style: const TextStyle(
+                      color: gold,
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Eliminar partida',
+                  onPressed:
+                      items.length > 1 ? () => _removePartida(index) : null,
+                  icon: const Icon(Icons.delete_outline),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              key: ValueKey('partida-${identityHashCode(item)}'),
+              initialValue: item.description,
+              decoration: const InputDecoration(
+                labelText: 'Nombre de la partida *',
+                hintText: 'Ej.: Pintura',
+                prefixIcon: Icon(Icons.category_outlined),
+              ),
+              onChanged: (value) {
+                item.description = value;
+              },
+              validator: (value) {
+                if (value == null || value.trim().isEmpty) {
+                  return 'Ingresa el nombre de la partida';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 18),
+            const Text(
+              'Trabajos incluidos',
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 15,
+              ),
+            ),
+            const SizedBox(height: 5),
+            const Text(
+              'Describe las actividades que contempla esta partida. '
+              'No se asignan precios individuales.',
+              style: TextStyle(
+                color: Colors.white54,
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(height: 14),
+            ...item.activities.asMap().entries.map((entry) {
+              final activityIndex = entry.key;
+              final activity = entry.value;
+
+              return Padding(
+                key: ValueKey(
+                  'activity-${identityHashCode(item)}-$activityIndex',
+                ),
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        initialValue: activity,
+                        maxLines: null,
+                        decoration: InputDecoration(
+                          labelText: 'Actividad ${activityIndex + 1}',
+                          hintText: 'Ej.: Lijado de paredes',
+                          alignLabelWithHint: true,
+                        ),
+                        onChanged: (value) {
+                          item.activities[activityIndex] = value;
+                        },
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Describe la actividad';
+                          }
+                          return null;
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    IconButton(
+                      tooltip: 'Eliminar actividad',
+                      onPressed: () => _removeActivity(item, activityIndex),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+              );
+            }),
+            TextButton.icon(
+              onPressed: () => _addActivity(item),
+              icon: const Icon(Icons.add),
+              label: const Text('Agregar actividad'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final net = items.fold<double>(
-      0,
-      (sum, item) => sum + item.total,
-    );
-
     final availableProjects = selectedClientId == null
         ? <Project>[]
         : projects
@@ -222,505 +390,282 @@ class _QuoteEditorState extends State<QuoteEditor> {
     return Scaffold(
       backgroundColor: ink,
       appBar: AppBar(
+        backgroundColor: ink,
         title: Text(
           widget.existing == null
               ? 'Nueva cotización'
               : 'Editar ${widget.existing!.id}',
         ),
-        backgroundColor: ink,
       ),
       body: Form(
         key: form,
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(
-              maxWidth: 900,
-            ),
-            child: ListView(
-              padding: const EdgeInsets.all(24),
-              children: [
-                // =================================================
-                // CLIENTE / PROYECTO
-                // =================================================
+            constraints: const BoxConstraints(maxWidth: 900),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final compact = constraints.maxWidth < 600;
 
-                const Text(
-                  'Cliente y obra',
-                  style: TextStyle(
-                    fontSize: 25,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-
-                const SizedBox(height: 8),
-
-                const Text(
-                  'Selecciona el cliente y, si corresponde, la obra asociada a esta cotización.',
-                  style: TextStyle(
-                    color: Colors.white54,
-                  ),
-                ),
-
-                const SizedBox(height: 18),
-
-                if (loadingClients)
-                  const LinearProgressIndicator()
-                else if (clients.isNotEmpty) ...[
-                  DropdownButtonFormField<String>(
-                    initialValue: selectedClientId,
-                    decoration: const InputDecoration(
-                      labelText: 'Cliente registrado',
-                      prefixIcon: Icon(
-                        Icons.people_outline,
-                      ),
+                return ListView(
+                  padding: EdgeInsets.all(compact ? 14 : 24),
+                  children: [
+                    _heading(
+                      'Cliente y obra',
+                      'Selecciona el cliente y, si corresponde, '
+                          'la obra asociada.',
                     ),
-                    hint: const Text(
-                      'Seleccionar cliente',
-                    ),
-                    items: clients
-                        .map(
-                          (item) => DropdownMenuItem<String>(
+                    const SizedBox(height: 18),
+                    if (loadingClients)
+                      const LinearProgressIndicator()
+                    else if (clients.isNotEmpty) ...[
+                      DropdownButtonFormField<String>(
+                        key: ValueKey(
+                          'client-$selectedClientId',
+                        ),
+                        initialValue: selectedClientId,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Cliente registrado',
+                          prefixIcon: Icon(Icons.people_outline),
+                        ),
+                        hint: const Text('Seleccionar cliente'),
+                        items: clients.map((item) {
+                          return DropdownMenuItem<String>(
                             value: item.id,
                             child: Text(
                               item.rut.isEmpty
                                   ? item.name
                                   : '${item.name} • ${item.rut}',
+                              overflow: TextOverflow.ellipsis,
                             ),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) {
-                      if (value == null) {
-                        return;
-                      }
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          if (value == null) return;
 
-                      final selected = clients.firstWhere(
-                        (item) => item.id == value,
-                      );
-
-                      setState(() {
-                        selectedClientId = selected.id;
-
-                        // Al cambiar de cliente,
-                        // eliminamos cualquier proyecto
-                        // seleccionado anteriormente.
-                        selectedProjectId = null;
-
-                        client.text = selected.name;
-
-                        email.text = selected.email;
-
-                        address.text = selected.address;
-                      });
-                    },
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  // ===============================================
-                  // PROYECTO
-                  // ===============================================
-
-                  if (loadingProjects)
-                    const LinearProgressIndicator()
-                  else if (selectedClientId == null)
-                    _informationBox(
-                      icon: Icons.apartment_outlined,
-                      text:
-                          'Selecciona un cliente para visualizar sus proyectos.',
-                    )
-                  else if (availableProjects.isEmpty)
-                    _informationBox(
-                      icon: Icons.info_outline,
-                      text:
-                          'Este cliente todavía no tiene obras o proyectos registrados. La cotización puede guardarse igualmente.',
-                    )
-                  else
-                    DropdownButtonFormField<String>(
-                      key: ValueKey(
-                        'project-$selectedClientId-$selectedProjectId',
-                      ),
-                      initialValue: selectedProjectId,
-                      decoration: const InputDecoration(
-                        labelText: 'Proyecto / Obra',
-                        prefixIcon: Icon(
-                          Icons.apartment_outlined,
-                        ),
-                      ),
-                      hint: const Text(
-                        'Sin proyecto asociado',
-                      ),
-                      items: [
-                        const DropdownMenuItem<String>(
-                          value: '',
-                          child: Text(
-                            'Sin proyecto asociado',
-                          ),
-                        ),
-                        ...availableProjects.map(
-                          (project) => DropdownMenuItem<String>(
-                            value: project.id,
-                            child: Text(
-                              '${project.name} • ${project.status}',
-                            ),
-                          ),
-                        ),
-                      ],
-                      onChanged: (value) {
-                        setState(() {
-                          if (value == null || value.isEmpty) {
-                            selectedProjectId = null;
-                            return;
-                          }
-
-                          selectedProjectId = value;
-
-                          final project = availableProjects.firstWhere(
+                          final selected = clients.firstWhere(
                             (item) => item.id == value,
                           );
 
-                          // Si la obra tiene dirección,
-                          // la usamos como dirección
-                          // de la cotización.
-                          if (project.address.trim().isNotEmpty) {
-                            address.text = project.address;
-                          }
-                        });
-                      },
-                    ),
-
-                  const SizedBox(height: 12),
-                ] else ...[
-                  _informationBox(
-                    icon: Icons.info_outline,
-                    text:
-                        'No hay clientes registrados. Puedes ingresar los datos manualmente.',
-                  ),
-                  const SizedBox(height: 12),
-                ],
-
-                // =================================================
-                // DATOS CLIENTE
-                // =================================================
-
-                field(
-                  'Nombre o empresa *',
-                  client,
-                  required: true,
-                ),
-
-                const SizedBox(height: 12),
-
-                field(
-                  'Correo',
-                  email,
-                ),
-
-                const SizedBox(height: 12),
-
-                field(
-                  'Dirección de obra',
-                  address,
-                ),
-
-                const SizedBox(height: 30),
-
-                // =================================================
-                // ITEMS
-                // =================================================
-
-                const Text(
-                  'Ítems',
-                  style: TextStyle(
-                    fontSize: 25,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-
-                const SizedBox(height: 14),
-
-                ...items.asMap().entries.map(
-                  (entry) {
-                    final index = entry.key;
-
-                    final item = entry.value;
-
-                    return Card(
-                      key: ValueKey(item),
-                      margin: const EdgeInsets.only(
-                        bottom: 12,
+                          setState(() {
+                            selectedClientId = selected.id;
+                            selectedProjectId = null;
+                            client.text = selected.name;
+                            email.text = selected.email;
+                            address.text = selected.address;
+                          });
+                        },
                       ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(
-                          16,
+                      const SizedBox(height: 12),
+                      if (loadingProjects)
+                        const LinearProgressIndicator()
+                      else if (selectedClientId == null)
+                        _informationBox(
+                          'Selecciona un cliente para visualizar '
+                          'sus proyectos.',
+                        )
+                      else if (availableProjects.isEmpty)
+                        _informationBox(
+                          'Este cliente todavía no tiene obras '
+                          'registradas. Puedes guardar la cotización '
+                          'sin asociarla a un proyecto.',
+                        )
+                      else
+                        DropdownButtonFormField<String>(
+                          key: ValueKey(
+                            'project-$selectedClientId-$selectedProjectId',
+                          ),
+                          initialValue: selectedProjectId,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Proyecto / Obra',
+                            prefixIcon: Icon(Icons.apartment_outlined),
+                          ),
+                          hint: const Text('Sin proyecto asociado'),
+                          items: [
+                            const DropdownMenuItem<String>(
+                              value: '',
+                              child: Text(
+                                'Sin proyecto asociado',
+                              ),
+                            ),
+                            ...availableProjects.map(
+                              (project) => DropdownMenuItem<String>(
+                                value: project.id,
+                                child: Text(
+                                  '${project.name} • ${project.status}',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
+                          ],
+                          onChanged: (value) {
+                            setState(() {
+                              if (value == null || value.isEmpty) {
+                                selectedProjectId = null;
+                                return;
+                              }
+
+                              selectedProjectId = value;
+
+                              final selected = availableProjects.firstWhere(
+                                (p) => p.id == value,
+                              );
+
+                              if (selected.address.trim().isNotEmpty) {
+                                address.text = selected.address;
+                              }
+                            });
+                          },
                         ),
+                      const SizedBox(height: 12),
+                    ] else ...[
+                      _informationBox(
+                        'No hay clientes registrados. Puedes '
+                        'ingresar los datos manualmente.',
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    _field(
+                      'Nombre o empresa *',
+                      client,
+                      required: true,
+                    ),
+                    const SizedBox(height: 12),
+                    _field('Correo', email),
+                    const SizedBox(height: 12),
+                    _field('Dirección de obra', address),
+                    const SizedBox(height: 30),
+                    _heading(
+                      'Partidas y trabajos',
+                      'Organiza los trabajos por partida. '
+                          'Cada partida puede contener varias '
+                          'descripciones, sin precios individuales.',
+                    ),
+                    const SizedBox(height: 16),
+                    ...items.asMap().entries.map(
+                          (entry) => _partidaCard(
+                            entry.value,
+                            entry.key,
+                          ),
+                        ),
+                    OutlinedButton.icon(
+                      onPressed: _addPartida,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Agregar partida'),
+                    ),
+                    const SizedBox(height: 30),
+                    _heading(
+                      'Presupuesto general',
+                      'Ingresa un único monto neto para toda '
+                          'la cotización.',
+                    ),
+                    const SizedBox(height: 16),
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(18),
                         child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             TextFormField(
-                              initialValue: item.description,
+                              controller: netAmount,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.digitsOnly,
+                              ],
                               decoration: const InputDecoration(
-                                labelText: 'Descripción *',
+                                labelText: 'Monto neto general *',
+                                prefixText: '\$ ',
+                                hintText: '2500000',
                               ),
-                              onChanged: (value) {
-                                item.description = value;
-                              },
+                              onChanged: (_) => setState(() {}),
                               validator: (value) {
                                 if (value == null || value.trim().isEmpty) {
-                                  return 'Describe el ítem';
+                                  return 'Ingresa el monto neto';
+                                }
+
+                                final amount = double.tryParse(
+                                  value,
+                                );
+
+                                if (amount == null || amount < 0) {
+                                  return 'Monto inválido';
                                 }
 
                                 return null;
                               },
                             ),
-                            const SizedBox(
-                              height: 12,
+                            const SizedBox(height: 22),
+                            _totalRow(
+                              'Neto',
+                              _money(_net),
                             ),
-                            Wrap(
-                              spacing: 12,
-                              runSpacing: 12,
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              children: [
-                                SizedBox(
-                                  width: 105,
-                                  child: DropdownButtonFormField<String>(
-                                    initialValue: item.unit,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Unidad',
-                                    ),
-                                    items: [
-                                      'UN',
-                                      'M2',
-                                      'M3',
-                                      'ML',
-                                      'KG',
-                                      'GL',
-                                    ]
-                                        .map(
-                                          (unit) => DropdownMenuItem<String>(
-                                            value: unit,
-                                            child: Text(
-                                              unit,
-                                            ),
-                                          ),
-                                        )
-                                        .toList(),
-                                    onChanged: (value) {
-                                      if (value == null) {
-                                        return;
-                                      }
-
-                                      setState(
-                                        () {
-                                          item.unit = value;
-                                        },
-                                      );
-                                    },
-                                  ),
-                                ),
-                                SizedBox(
-                                  width: 130,
-                                  child: TextFormField(
-                                    initialValue: item.quantity.toString(),
-                                    decoration: const InputDecoration(
-                                      labelText: 'Cantidad',
-                                    ),
-                                    keyboardType:
-                                        const TextInputType.numberWithOptions(
-                                      decimal: true,
-                                    ),
-                                    onChanged: (value) {
-                                      setState(
-                                        () {
-                                          item.quantity = double.tryParse(
-                                                value.replaceAll(
-                                                  ',',
-                                                  '.',
-                                                ),
-                                              ) ??
-                                              0;
-                                        },
-                                      );
-                                    },
-                                    validator: (_) => item.quantity <= 0
-                                        ? 'Debe ser > 0'
-                                        : null,
-                                  ),
-                                ),
-                                SizedBox(
-                                  width: 160,
-                                  child: TextFormField(
-                                    initialValue: item.price.toStringAsFixed(
-                                      0,
-                                    ),
-                                    decoration: const InputDecoration(
-                                      labelText: 'Precio unitario',
-                                    ),
-                                    keyboardType: TextInputType.number,
-                                    inputFormatters: [
-                                      FilteringTextInputFormatter.digitsOnly,
-                                    ],
-                                    onChanged: (value) {
-                                      setState(
-                                        () {
-                                          item.price = double.tryParse(
-                                                value,
-                                              ) ??
-                                              0;
-                                        },
-                                      );
-                                    },
-                                    validator: (_) => item.price < 0
-                                        ? 'Precio inválido'
-                                        : null,
-                                  ),
-                                ),
-                                Text(
-                                  _money(
-                                    item.total,
-                                  ),
-                                  style: const TextStyle(
-                                    color: gold,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                IconButton(
-                                  tooltip: 'Eliminar ítem',
-                                  onPressed: items.length > 1
-                                      ? () {
-                                          setState(
-                                            () {
-                                              items.removeAt(
-                                                index,
-                                              );
-                                            },
-                                          );
-                                        }
-                                      : null,
-                                  icon: const Icon(
-                                    Icons.delete_outline,
-                                  ),
-                                ),
-                              ],
+                            const SizedBox(height: 9),
+                            _totalRow(
+                              'IVA (19 %)',
+                              _money(_vat),
+                            ),
+                            const Divider(height: 28),
+                            _totalRow(
+                              'TOTAL',
+                              _money(_total),
+                              highlighted: true,
                             ),
                           ],
                         ),
                       ),
-                    );
-                  },
-                ),
-
-                TextButton.icon(
-                  onPressed: () {
-                    setState(() {
-                      items.add(
-                        QuoteItem(
-                          '',
-                          'GL',
-                          1,
-                          0,
-                        ),
-                      );
-                    });
-                  },
-                  icon: const Icon(Icons.add),
-                  label: const Text(
-                    'Agregar ítem',
-                  ),
-                ),
-
-                const SizedBox(height: 20),
-
-                // =================================================
-                // TOTALES
-                // =================================================
-
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        'Neto: ${_money(net)}',
+                    ),
+                    const SizedBox(height: 28),
+                    _heading(
+                      'Condiciones de la cotización',
+                      'Forma de pago, observaciones y estado.',
+                    ),
+                    const SizedBox(height: 16),
+                    _field(
+                      'Forma de pago',
+                      payment,
+                      maxLines: 2,
+                    ),
+                    const SizedBox(height: 12),
+                    _field(
+                      'Observaciones',
+                      notes,
+                      maxLines: 3,
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: status,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Estado',
                       ),
-                      Text(
-                        'IVA (19%): ${_money(
-                          (net * .19).round(),
-                        )}',
-                      ),
-                      Text(
-                        'Total: ${_money(
-                          net + (net * .19).round(),
-                        )}',
-                        style: const TextStyle(
-                          fontSize: 26,
-                          color: gold,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 25),
-
-                // =================================================
-                // DATOS FINALES
-                // =================================================
-
-                field(
-                  'Forma de pago',
-                  payment,
-                ),
-
-                const SizedBox(height: 12),
-
-                field(
-                  'Observaciones',
-                  notes,
-                ),
-
-                const SizedBox(height: 12),
-
-                DropdownButtonFormField<String>(
-                  initialValue: status,
-                  decoration: const InputDecoration(
-                    labelText: 'Estado',
-                  ),
-                  items: [
-                    'Borrador',
-                    'Enviada',
-                    'Aprobada',
-                    'Rechazada',
-                  ]
-                      .map(
-                        (value) => DropdownMenuItem<String>(
+                      items: [
+                        'Borrador',
+                        'Enviada',
+                        'Aprobada',
+                        'Rechazada',
+                      ].map((value) {
+                        return DropdownMenuItem<String>(
                           value: value,
                           child: Text(value),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (value) {
-                    if (value != null) {
-                      setState(() {
-                        status = value;
-                      });
-                    }
-                  },
-                ),
-
-                const SizedBox(height: 28),
-
-                FilledButton.icon(
-                  onPressed: _saveQuote,
-                  icon: const Icon(
-                    Icons.save_outlined,
-                  ),
-                  label: const Text(
-                    'Guardar cotización',
-                  ),
-                ),
-
-                const SizedBox(height: 35),
-              ],
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() => status = value);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 28),
+                    FilledButton.icon(
+                      onPressed: _saveQuote,
+                      icon: const Icon(Icons.save_outlined),
+                      label: const Text('Guardar cotización'),
+                    ),
+                    const SizedBox(height: 36),
+                  ],
+                );
+              },
             ),
           ),
         ),
@@ -728,52 +673,45 @@ class _QuoteEditorState extends State<QuoteEditor> {
     );
   }
 
-  // ============================================================
-  // INFORMATION BOX
-  // ============================================================
-
-  Widget _informationBox({
-    required IconData icon,
-    required String text,
+  Widget _totalRow(
+    String label,
+    String value, {
+    bool highlighted = false,
   }) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: panel,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: Colors.white.withValues(
-            alpha: 0.06,
-          ),
-        ),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            icon,
-            color: gold,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              text,
-              style: const TextStyle(
-                color: Colors.white60,
-              ),
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: highlighted ? 18 : 14,
+              fontWeight: highlighted ? FontWeight.bold : FontWeight.normal,
             ),
           ),
-        ],
-      ),
+        ),
+        Text(
+          value,
+          style: TextStyle(
+            color: highlighted ? gold : Colors.white,
+            fontSize: highlighted ? 23 : 15,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ],
     );
   }
-
-  // ============================================================
-  // GUARDAR
-  // ============================================================
 
   void _saveQuote() {
     if (!form.currentState!.validate()) {
+      return;
+    }
+
+    if (items.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Agrega al menos una partida.'),
+        ),
+      );
       return;
     }
 
@@ -786,14 +724,23 @@ class _QuoteEditorState extends State<QuoteEditor> {
     String projectName = '';
 
     if (selectedProjectId != null && selectedProjectId!.isNotEmpty) {
-      final selectedProject = projects.firstWhere(
+      final selected = projects.firstWhere(
         (project) => project.id == selectedProjectId,
       );
 
-      projectId = selectedProject.id;
-
-      projectName = selectedProject.name;
+      projectId = selected.id;
+      projectName = selected.name;
     }
+
+    final cleanItems = items.map((item) {
+      return QuoteItem.partida(
+        description: item.description.trim(),
+        activities: item.activities
+            .map((activity) => activity.trim())
+            .where((activity) => activity.isNotEmpty)
+            .toList(),
+      );
+    }).toList();
 
     final quote = Quote(
       id,
@@ -807,12 +754,10 @@ class _QuoteEditorState extends State<QuoteEditor> {
       payment.text.trim(),
       status,
       widget.existing?.date ?? now,
-      items,
+      cleanItems,
+      netAmount: _net,
     );
 
-    Navigator.pop(
-      context,
-      quote,
-    );
+    Navigator.pop(context, quote);
   }
 }

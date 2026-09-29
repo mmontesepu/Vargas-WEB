@@ -17,7 +17,8 @@ class WebSiteSettingsRepository {
         .eq('setting_key', heroKey)
         .single();
 
-    return row['storage_path'] as String?;
+    final path = row['storage_path'] as String?;
+    return path == null || path.trim().isEmpty ? null : path;
   }
 
   static Future<String> signedUrl(String path) {
@@ -70,13 +71,27 @@ class WebSiteSettingsRepository {
           .select('setting_key')
           .single();
     } catch (_) {
-      // Si falla la actualización de la tabla, retiramos
-      // la fotografía recién cargada para evitar un archivo huérfano.
       try {
         await _db.storage.from(bucket).remove([path]);
       } catch (_) {}
 
       rethrow;
     }
+  }
+
+  /// Desactiva la imagen personalizada.
+  ///
+  /// La página pública volverá a utilizar su imagen referencial.
+  /// No borra el archivo físico del bucket.
+  static Future<void> restoreDefault() async {
+    await _db
+        .from('web_site_settings')
+        .update({
+          'storage_path': null,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('setting_key', heroKey)
+        .select('setting_key')
+        .single();
   }
 }

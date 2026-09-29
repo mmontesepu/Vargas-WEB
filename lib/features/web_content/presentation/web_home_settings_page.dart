@@ -19,6 +19,8 @@ class _WebHomeSettingsPageState extends State<WebHomeSettingsPage> {
   bool _loading = true;
   bool _saving = false;
 
+  bool get _hasCustomImage => _heroPath != null && _heroPath!.trim().isNotEmpty;
+
   @override
   void initState() {
     super.initState();
@@ -58,7 +60,7 @@ class _WebHomeSettingsPageState extends State<WebHomeSettingsPage> {
   }
 
   Future<void> _changeHero() async {
-    if (_saving) return;
+    if (_saving || _loading) return;
 
     try {
       final files = await picker.FilePicker.pickFiles(
@@ -112,10 +114,72 @@ class _WebHomeSettingsPageState extends State<WebHomeSettingsPage> {
     }
   }
 
+  Future<void> _restoreDefault() async {
+    if (_saving || _loading || !_hasCustomImage) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Restaurar imagen predeterminada'),
+        content: const Text(
+          'Se dejará de mostrar la fotografía personalizada '
+          'y la página principal volverá a utilizar su imagen '
+          'referencial. ¿Deseas continuar?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: const Icon(Icons.restore),
+            label: const Text('Restaurar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _saving = true);
+
+    try {
+      await WebSiteSettingsRepository.restoreDefault();
+
+      await _load();
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Se restauró la fotografía predeterminada '
+            'de la página principal.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'No fue posible restaurar la fotografía: $error',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(30),
+      padding: const EdgeInsets.all(24),
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 1100),
@@ -186,31 +250,50 @@ class _WebHomeSettingsPageState extends State<WebHomeSettingsPage> {
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      _heroPath == null
-                          ? 'Actualmente se utiliza la fotografía '
-                              'referencial de la Home.'
-                          : 'Fotografía personalizada configurada.',
+                      _hasCustomImage
+                          ? 'Fotografía personalizada configurada.'
+                          : 'Actualmente se utiliza la fotografía '
+                              'referencial de la Home.',
                       style: const TextStyle(
                         color: Colors.white60,
                       ),
                     ),
                     const SizedBox(height: 20),
-                    FilledButton.icon(
-                      onPressed: (_loading || _saving) ? null : _changeHero,
-                      icon: _saving
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                              ),
-                            )
-                          : const Icon(Icons.upload_outlined),
-                      label: Text(
-                        _saving
-                            ? 'Guardando fotografía...'
-                            : 'Cambiar fotografía principal',
-                      ),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        FilledButton.icon(
+                          onPressed: (_loading || _saving) ? null : _changeHero,
+                          icon: _saving
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.upload_outlined,
+                                ),
+                          label: Text(
+                            _saving
+                                ? 'Procesando...'
+                                : 'Cambiar fotografía principal',
+                          ),
+                        ),
+                        if (_hasCustomImage)
+                          OutlinedButton.icon(
+                            onPressed:
+                                (_loading || _saving) ? null : _restoreDefault,
+                            icon: const Icon(
+                              Icons.restore_outlined,
+                            ),
+                            label: const Text(
+                              'Restaurar imagen predeterminada',
+                            ),
+                          ),
+                      ],
                     ),
                     const SizedBox(height: 12),
                     const Text(
@@ -275,21 +358,36 @@ class _WebHomeSettingsPageState extends State<WebHomeSettingsPage> {
       return const ColoredBox(
         color: Color(0xFF27292B),
         child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.wallpaper_outlined,
-                size: 48,
-                color: gold,
-              ),
-              SizedBox(height: 12),
-              Text(
-                'Todavía no hay una fotografía personalizada.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white60),
-              ),
-            ],
+          child: Padding(
+            padding: EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.wallpaper_outlined,
+                  size: 48,
+                  color: gold,
+                ),
+                SizedBox(height: 12),
+                Text(
+                  'Imagen referencial activa',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                SizedBox(height: 6),
+                Text(
+                  'La página pública utiliza su fotografía '
+                  'predeterminada.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white54,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       );

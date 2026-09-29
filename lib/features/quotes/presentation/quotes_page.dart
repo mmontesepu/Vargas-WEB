@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_theme.dart';
+
 import '../models/quote.dart';
 import '../repositories/quote_repository.dart';
 import '../services/quote_pdf_service.dart';
@@ -45,14 +46,34 @@ class _QuotesPageState extends State<QuotesPage> {
   }
 
   Future<void> _load() async {
-    final result = await QuoteRepository.getAll();
+    try {
+      final result = await QuoteRepository.getAll();
 
+      if (!mounted) return;
+
+      setState(() {
+        quotes = result;
+        loading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+
+      setState(() {
+        loading = false;
+      });
+
+      _message(
+        'No fue posible cargar las cotizaciones: $error',
+      );
+    }
+  }
+
+  void _message(String message) {
     if (!mounted) return;
 
-    setState(() {
-      quotes = result;
-      loading = false;
-    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   Future<void> _save(Quote quote) async {
@@ -61,94 +82,102 @@ class _QuotesPageState extends State<QuotesPage> {
 
   Future<void> _createProject(Quote quote) async {
     if (quote.status != 'Aprobada') {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Solo puedes crear proyectos desde cotizaciones aprobadas.',
-          ),
-        ),
+      _message(
+        'Solo puedes crear proyectos desde '
+        'cotizaciones aprobadas.',
       );
       return;
     }
 
     if (quote.clientId.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'La cotización debe tener un cliente registrado.',
-          ),
-        ),
+      _message(
+        'La cotización debe tener un cliente registrado.',
       );
       return;
     }
 
     if (quote.projectId.trim().isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Esta cotización ya está asociada a un proyecto.',
-          ),
-        ),
+      _message(
+        'Esta cotización ya está asociada a un proyecto.',
       );
       return;
     }
 
-    final existingProject = await ProjectRepository.findBySourceQuote(quote.id);
+    try {
+      final existingProject = await ProjectRepository.findBySourceQuote(
+        quote.id,
+      );
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    if (existingProject != null) {
-      // Recuperación de una relación que no quedó reflejada
-      // en la cotización, evitando generar una obra duplicada.
-      quote.projectId = existingProject.id;
-      quote.projectName = existingProject.name;
+      if (existingProject != null) {
+        quote.projectId = existingProject.id;
+        quote.projectName = existingProject.name;
+
+        await _save(quote);
+
+        if (!mounted) return;
+
+        await _load();
+
+        _message(
+          'Se recuperó la asociación con el proyecto existente.',
+        );
+
+        return;
+      }
+
+      final project = await Navigator.push<Project>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ProjectEditorPage(
+            sourceQuote: quote,
+          ),
+        ),
+      );
+
+      if (!mounted || project == null) return;
+
+      quote.projectId = project.id;
+      quote.projectName = project.name;
 
       await _save(quote);
 
       if (!mounted) return;
 
-      setState(() {});
+      await _load();
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'La cotización ya tenía un proyecto. Se recuperó su asociación.',
-          ),
-        ),
+      _message(
+        'Proyecto "${project.name}" creado correctamente.',
       );
-      return;
+    } catch (error) {
+      _message(
+        'No fue posible asociar el proyecto: $error',
+      );
+    }
+  }
+
+  int get _nextNumber {
+    final year = DateTime.now().year;
+
+    final numbers = quotes.where((quote) {
+      return quote.id.startsWith('COT-$year-');
+    }).map((quote) {
+      return int.tryParse(
+            quote.id.split('-').last,
+          ) ??
+          0;
+    });
+
+    var maxNumber = 0;
+
+    for (final number in numbers) {
+      if (number > maxNumber) {
+        maxNumber = number;
+      }
     }
 
-    final project = await Navigator.push<Project>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => ProjectEditorPage(
-          sourceQuote: quote,
-        ),
-      ),
-    );
-
-    if (!mounted || project == null) return;
-
-    // El formulario ya guardó el proyecto mediante
-    // ProjectRepository.createFromApprovedQuote().
-    // Aquí solamente vinculamos la cotización.
-    quote.projectId = project.id;
-    quote.projectName = project.name;
-
-    await _save(quote);
-
-    if (!mounted) return;
-
-    setState(() {});
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Proyecto "${project.name}" creado correctamente.',
-        ),
-      ),
-    );
+    return maxNumber + 1;
   }
 
   Future<void> _edit([Quote? existing]) async {
@@ -157,7 +186,7 @@ class _QuotesPageState extends State<QuotesPage> {
       MaterialPageRoute(
         builder: (_) => QuoteEditor(
           existing: existing,
-          nextNumber: quotes.length + 1,
+          nextNumber: _nextNumber,
         ),
       ),
     );
@@ -171,26 +200,24 @@ class _QuotesPageState extends State<QuotesPage> {
 
       await _load();
 
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            existing == null
-                ? 'Cotización creada correctamente.'
-                : 'Cotización actualizada correctamente.',
-          ),
-        ),
+      _message(
+        existing == null
+            ? 'Cotización creada correctamente.'
+            : 'Cotización actualizada correctamente.',
       );
     } catch (error) {
-      if (!mounted) return;
+      _message(
+        'No fue posible guardar la cotización: $error',
+      );
+    }
+  }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'No fue posible guardar la cotización: $error',
-          ),
-        ),
+  Future<void> _generatePdf(Quote quote) async {
+    try {
+      await QuotePdfService.generate(quote);
+    } catch (error) {
+      _message(
+        'No fue posible generar el PDF: $error',
       );
     }
   }
@@ -205,37 +232,20 @@ class _QuotesPageState extends State<QuotesPage> {
           quote.client.toLowerCase().contains(search) ||
           quote.email.toLowerCase().contains(search) ||
           quote.address.toLowerCase().contains(search) ||
-          quote.projectName.toLowerCase().contains(search);
+          quote.projectName.toLowerCase().contains(search) ||
+          quote.items.any(
+            (item) =>
+                item.description.toLowerCase().contains(search) ||
+                item.activities.any(
+                  (activity) => activity.toLowerCase().contains(search),
+                ),
+          );
 
       final matchesStatus =
           _statusFilter == 'Todas' || quote.status == _statusFilter;
 
       return matchesSearch && matchesStatus;
     }).toList();
-
-    final draftCount = quotes
-        .where(
-          (quote) => quote.status == 'Borrador',
-        )
-        .length;
-
-    final sentCount = quotes
-        .where(
-          (quote) => quote.status == 'Enviada',
-        )
-        .length;
-
-    final approvedCount = quotes
-        .where(
-          (quote) => quote.status == 'Aprobada',
-        )
-        .length;
-
-    final rejectedCount = quotes
-        .where(
-          (quote) => quote.status == 'Rechazada',
-        )
-        .length;
 
     final totalQuoted = quotes.fold<double>(
       0,
@@ -249,86 +259,58 @@ class _QuotesPageState extends State<QuotesPage> {
             maxWidth: 1150,
           ),
           child: Padding(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
                   'Gestión de cotizaciones',
                   style: TextStyle(
-                    fontSize: 30,
+                    fontSize: 28,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-
-                const SizedBox(height: 10),
-
+                const SizedBox(height: 8),
                 const Text(
-                  'Gestiona tus propuestas y genera documentos para tus clientes.',
+                  'Gestiona tus propuestas y genera '
+                  'documentos para tus clientes.',
                   style: TextStyle(
                     color: Colors.white60,
                   ),
                 ),
-
-                const SizedBox(height: 28),
-
-                //
-                // RESUMEN
-                //
-                Wrap(
-                  spacing: 15,
-                  runSpacing: 15,
-                  children: [
-                    _summaryCard(
-                      title: 'Cotizaciones',
-                      value: '${quotes.length}',
-                      icon: Icons.description_outlined,
-                    ),
-                    _summaryCard(
-                      title: 'Total cotizado',
-                      value: _money(totalQuoted),
-                      icon: Icons.attach_money,
-                    ),
-                  ],
-                ),
-
                 const SizedBox(height: 24),
-
-                //
-                // FILTROS DE ESTADO
-                //
                 Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
+                  spacing: 12,
+                  runSpacing: 12,
                   children: [
-                    _statusChip(
-                      label: 'Todas',
-                      count: quotes.length,
+                    _summaryCard(
+                      'Cotizaciones',
+                      '${quotes.length}',
+                      Icons.description_outlined,
                     ),
-                    _statusChip(
-                      label: 'Borrador',
-                      count: draftCount,
-                    ),
-                    _statusChip(
-                      label: 'Enviada',
-                      count: sentCount,
-                    ),
-                    _statusChip(
-                      label: 'Aprobada',
-                      count: approvedCount,
-                    ),
-                    _statusChip(
-                      label: 'Rechazada',
-                      count: rejectedCount,
+                    _summaryCard(
+                      'Total cotizado',
+                      _money(totalQuoted),
+                      Icons.attach_money,
                     ),
                   ],
                 ),
-
-                const SizedBox(height: 28),
-
-                //
-                // BUSCADOR + NUEVA COTIZACIÓN
-                //
+                const SizedBox(height: 24),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final status in [
+                      'Todas',
+                      'Borrador',
+                      'Enviada',
+                      'Aprobada',
+                      'Rechazada',
+                    ])
+                      _statusChip(status),
+                  ],
+                ),
+                const SizedBox(height: 24),
                 LayoutBuilder(
                   builder: (context, constraints) {
                     final compact = constraints.maxWidth < 700;
@@ -341,21 +323,12 @@ class _QuotesPageState extends State<QuotesPage> {
                         });
                       },
                       decoration: InputDecoration(
-                        hintText:
-                            'Buscar por cotización, cliente, proyecto, correo o dirección...',
-                        prefixIcon: const Icon(
-                          Icons.search,
-                        ),
+                        hintText: 'Buscar cotización...',
+                        prefixIcon: const Icon(Icons.search),
                         suffixIcon: _search.isNotEmpty
                             ? IconButton(
-                                tooltip: 'Limpiar búsqueda',
-                                onPressed: () {
-                                  _searchController.clear();
-
-                                  setState(() {
-                                    _search = '';
-                                  });
-                                },
+                                tooltip: 'Limpiar',
+                                onPressed: _clearFilters,
                                 icon: const Icon(
                                   Icons.close,
                                 ),
@@ -364,11 +337,9 @@ class _QuotesPageState extends State<QuotesPage> {
                       ),
                     );
 
-                    final newQuoteButton = FilledButton.icon(
+                    final newButton = FilledButton.icon(
                       onPressed: () => _edit(),
-                      icon: const Icon(
-                        Icons.add,
-                      ),
+                      icon: const Icon(Icons.add),
                       label: const Text(
                         'Nueva cotización',
                       ),
@@ -380,82 +351,49 @@ class _QuotesPageState extends State<QuotesPage> {
                         children: [
                           searchField,
                           const SizedBox(height: 12),
-                          newQuoteButton,
+                          newButton,
                         ],
                       );
                     }
 
                     return Row(
                       children: [
-                        Expanded(
-                          child: searchField,
-                        ),
-                        const SizedBox(width: 14),
-                        newQuoteButton,
+                        Expanded(child: searchField),
+                        const SizedBox(width: 12),
+                        newButton,
                       ],
                     );
                   },
                 ),
-
                 const SizedBox(height: 24),
-
-                //
-                // RESULTADOS
-                //
                 if (loading)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(
-                      vertical: 60,
-                    ),
-                    child: Center(
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(40),
                       child: CircularProgressIndicator(),
                     ),
                   )
-                else if (quotes.isEmpty)
-                  _emptyQuotes()
                 else if (filteredQuotes.isEmpty)
-                  _emptySearch()
+                  _emptyState()
                 else ...[
-                  Row(
-                    children: [
-                      Text(
-                        '${filteredQuotes.length} '
-                        '${filteredQuotes.length == 1 ? 'resultado' : 'resultados'}',
-                        style: const TextStyle(
-                          color: Colors.white54,
-                          fontSize: 13,
-                        ),
-                      ),
-                      const Spacer(),
-                      if (_statusFilter != 'Todas' || _search.isNotEmpty)
-                        TextButton.icon(
-                          onPressed: _clearFilters,
-                          icon: const Icon(
-                            Icons.filter_alt_off_outlined,
-                            size: 18,
-                          ),
-                          label: const Text(
-                            'Limpiar filtros',
-                          ),
-                        ),
-                    ],
+                  Text(
+                    '${filteredQuotes.length} '
+                    '${filteredQuotes.length == 1 ? 'resultado' : 'resultados'}',
+                    style: const TextStyle(
+                      color: Colors.white54,
+                    ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 12),
                   ListView.separated(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
                     itemCount: filteredQuotes.length,
-                    separatorBuilder: (context, index) => const SizedBox(
-                      height: 10,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (_, index) => _quoteCard(
+                      filteredQuotes[index],
                     ),
-                    itemBuilder: (_, index) {
-                      final quote = filteredQuotes[index];
-
-                      return _quoteCard(quote);
-                    },
                   ),
                 ],
-
                 const SizedBox(height: 30),
               ],
             ),
@@ -465,43 +403,22 @@ class _QuotesPageState extends State<QuotesPage> {
     );
   }
 
-  //
-  // TARJETA RESUMEN
-  //
-  Widget _summaryCard({
-    required String title,
-    required String value,
-    required IconData icon,
-  }) {
+  Widget _summaryCard(
+    String title,
+    String value,
+    IconData icon,
+  ) {
     return Container(
       width: 250,
-      padding: const EdgeInsets.all(22),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: panel,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Colors.white.withValues(
-            alpha: 0.06,
-          ),
-        ),
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Row(
         children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: gold.withValues(
-                alpha: 0.12,
-              ),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(
-              icon,
-              color: gold,
-            ),
-          ),
-          const SizedBox(width: 16),
+          Icon(icon, color: gold, size: 30),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -510,6 +427,7 @@ class _QuotesPageState extends State<QuotesPage> {
                   title,
                   style: const TextStyle(
                     color: Colors.white60,
+                    fontSize: 12,
                   ),
                 ),
                 const SizedBox(height: 5),
@@ -518,7 +436,7 @@ class _QuotesPageState extends State<QuotesPage> {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: gold,
-                    fontSize: 24,
+                    fontSize: 20,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -530,102 +448,33 @@ class _QuotesPageState extends State<QuotesPage> {
     );
   }
 
-  //
-  // CHIP DE ESTADO
-  //
-  Widget _statusChip({
-    required String label,
-    required int count,
-  }) {
-    final selected = _statusFilter == label;
+  Widget _statusChip(String status) {
+    final count = status == 'Todas'
+        ? quotes.length
+        : quotes.where((quote) => quote.status == status).length;
 
-    return InkWell(
-      borderRadius: BorderRadius.circular(30),
-      onTap: () {
+    final selected = _statusFilter == status;
+
+    return ChoiceChip(
+      label: Text('$status ($count)'),
+      selected: selected,
+      onSelected: (_) {
         setState(() {
-          _statusFilter = label;
+          _statusFilter = status;
         });
       },
-      child: AnimatedContainer(
-        duration: const Duration(
-          milliseconds: 180,
-        ),
-        padding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 10,
-        ),
-        decoration: BoxDecoration(
-          color: selected
-              ? gold.withValues(
-                  alpha: 0.16,
-                )
-              : panel,
-          borderRadius: BorderRadius.circular(30),
-          border: Border.all(
-            color: selected
-                ? gold
-                : Colors.white.withValues(
-                    alpha: 0.06,
-                  ),
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                color: selected ? gold : Colors.white70,
-                fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 8,
-                vertical: 2,
-              ),
-              decoration: BoxDecoration(
-                color: selected
-                    ? gold.withValues(
-                        alpha: 0.18,
-                      )
-                    : Colors.white.withValues(
-                        alpha: 0.06,
-                      ),
-                borderRadius: BorderRadius.circular(
-                  20,
-                ),
-              ),
-              child: Text(
-                '$count',
-                style: TextStyle(
-                  color: selected ? gold : Colors.white60,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+      selectedColor: gold.withValues(alpha: 0.20),
     );
   }
 
-  //
-  // TARJETA DE COTIZACIÓN
-  //
   Widget _quoteCard(Quote quote) {
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
-        padding: const EdgeInsets.all(18),
+        padding: const EdgeInsets.all(16),
         child: LayoutBuilder(
-          builder: (
-            context,
-            constraints,
-          ) {
-            final compact = constraints.maxWidth < 700;
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 650;
 
             final information = Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -638,13 +487,11 @@ class _QuotesPageState extends State<QuotesPage> {
                     Text(
                       quote.id,
                       style: const TextStyle(
-                        fontSize: 16,
                         fontWeight: FontWeight.bold,
+                        fontSize: 16,
                       ),
                     ),
-                    _statusBadge(
-                      quote.status,
-                    ),
+                    _statusBadge(quote.status),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -652,53 +499,42 @@ class _QuotesPageState extends State<QuotesPage> {
                   quote.client,
                   style: const TextStyle(
                     fontSize: 16,
-                    fontWeight: FontWeight.w500,
                   ),
                 ),
                 if (quote.projectName.trim().isNotEmpty) ...[
-                  const SizedBox(height: 7),
-                  _metadata(
-                    Icons.apartment_outlined,
+                  const SizedBox(height: 6),
+                  Text(
                     'Obra: ${quote.projectName}',
+                    style: const TextStyle(
+                      color: Colors.white60,
+                      fontSize: 12,
+                    ),
                   ),
                 ],
-                const SizedBox(height: 5),
-                Wrap(
-                  spacing: 14,
-                  runSpacing: 5,
-                  children: [
-                    _metadata(
-                      Icons.calendar_today_outlined,
-                      '${quote.date.day.toString().padLeft(2, '0')}/'
-                      '${quote.date.month.toString().padLeft(2, '0')}/'
-                      '${quote.date.year}',
-                    ),
-                    if (quote.email.isNotEmpty)
-                      _metadata(
-                        Icons.email_outlined,
-                        quote.email,
-                      ),
-                  ],
+                const SizedBox(height: 6),
+                Text(
+                  '${quote.date.day.toString().padLeft(2, '0')}/'
+                  '${quote.date.month.toString().padLeft(2, '0')}/'
+                  '${quote.date.year}'
+                  '  •  ${quote.items.length} '
+                  '${quote.items.length == 1 ? 'partida' : 'partidas'}',
+                  style: const TextStyle(
+                    color: Colors.white54,
+                    fontSize: 12,
+                  ),
                 ),
               ],
             );
 
-            final actions = Row(
-              mainAxisSize: MainAxisSize.min,
+            final actions = Wrap(
+              spacing: 2,
+              runSpacing: 2,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Text(
-                  _money(quote.total),
-                  style: const TextStyle(
-                    color: gold,
-                    fontSize: 17,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(width: 10),
                 if (quote.status == 'Aprobada' &&
                     quote.projectId.trim().isEmpty)
                   IconButton(
-                    tooltip: 'Crear proyecto desde esta cotización',
+                    tooltip: 'Crear proyecto',
                     onPressed: () => _createProject(quote),
                     icon: const Icon(
                       Icons.add_business_outlined,
@@ -707,14 +543,11 @@ class _QuotesPageState extends State<QuotesPage> {
                   ),
                 if (quote.projectId.trim().isNotEmpty)
                   IconButton(
-                    tooltip: 'Proyecto asociado: ${quote.projectName}',
+                    tooltip: 'Proyecto asociado',
                     onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            'Proyecto asociado: ${quote.projectName}',
-                          ),
-                        ),
+                      _message(
+                        'Proyecto asociado: '
+                        '${quote.projectName}',
                       );
                     },
                     icon: const Icon(
@@ -724,7 +557,7 @@ class _QuotesPageState extends State<QuotesPage> {
                   ),
                 IconButton(
                   tooltip: 'Generar PDF',
-                  onPressed: () => QuotePdfService.generate(quote),
+                  onPressed: () => _generatePdf(quote),
                   icon: const Icon(
                     Icons.picture_as_pdf_outlined,
                   ),
@@ -744,16 +577,21 @@ class _QuotesPageState extends State<QuotesPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   information,
-                  const SizedBox(
-                    height: 16,
-                  ),
+                  const SizedBox(height: 14),
                   const Divider(),
-                  const SizedBox(
-                    height: 5,
-                  ),
+                  const SizedBox(height: 5),
                   Row(
                     children: [
-                      const Spacer(),
+                      Expanded(
+                        child: Text(
+                          _money(quote.total),
+                          style: const TextStyle(
+                            color: gold,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
                       actions,
                     ],
                   ),
@@ -763,12 +601,17 @@ class _QuotesPageState extends State<QuotesPage> {
 
             return Row(
               children: [
-                Expanded(
-                  child: information,
+                Expanded(child: information),
+                const SizedBox(width: 16),
+                Text(
+                  _money(quote.total),
+                  style: const TextStyle(
+                    color: gold,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-                const SizedBox(
-                  width: 20,
-                ),
+                const SizedBox(width: 8),
                 actions,
               ],
             );
@@ -778,179 +621,59 @@ class _QuotesPageState extends State<QuotesPage> {
     );
   }
 
-  //
-  // BADGE DE ESTADO
-  //
-  Widget _statusBadge(
-    String status,
-  ) {
-    IconData icon;
-
-    switch (status) {
-      case 'Aprobada':
-        icon = Icons.check_circle_outline;
-        break;
-
-      case 'Rechazada':
-        icon = Icons.cancel_outlined;
-        break;
-
-      case 'Enviada':
-        icon = Icons.send_outlined;
-        break;
-
-      default:
-        icon = Icons.edit_note_outlined;
-    }
-
+  Widget _statusBadge(String status) {
     return Container(
       padding: const EdgeInsets.symmetric(
-        horizontal: 9,
-        vertical: 4,
+        horizontal: 10,
+        vertical: 5,
       ),
       decoration: BoxDecoration(
-        color: gold.withValues(
-          alpha: 0.10,
-        ),
+        color: gold.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            icon,
-            size: 14,
-            color: gold,
-          ),
-          const SizedBox(width: 5),
-          Text(
-            status,
-            style: const TextStyle(
-              color: gold,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
+      child: Text(
+        status,
+        style: const TextStyle(
+          color: gold,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }
 
-  Widget _metadata(
-    IconData icon,
-    String value,
-  ) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(
-          icon,
-          size: 14,
-          color: Colors.white38,
-        ),
-        const SizedBox(width: 5),
-        Text(
-          value,
-          style: const TextStyle(
-            color: Colors.white54,
-            fontSize: 12,
-          ),
-        ),
-      ],
-    );
-  }
-
-  //
-  // SIN COTIZACIONES
-  //
-  Widget _emptyQuotes() {
+  Widget _emptyState() {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(
-        vertical: 65,
+        vertical: 50,
+        horizontal: 16,
       ),
       decoration: BoxDecoration(
         color: panel,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Column(
         children: [
           const Icon(
             Icons.description_outlined,
-            size: 50,
             color: gold,
+            size: 44,
           ),
-          const SizedBox(height: 15),
-          const Text(
-            'Aún no tienes cotizaciones',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 7),
-          const Text(
-            'Crea tu primera cotización para comenzar.',
-            style: TextStyle(
-              color: Colors.white54,
-            ),
-          ),
-          const SizedBox(height: 20),
-          FilledButton.icon(
-            onPressed: () => _edit(),
-            icon: const Icon(Icons.add),
-            label: const Text(
-              'Nueva cotización',
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  //
-  // SIN RESULTADOS
-  //
-  Widget _emptySearch() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(
-        vertical: 55,
-      ),
-      decoration: BoxDecoration(
-        color: panel,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        children: [
-          const Icon(
-            Icons.search_off,
-            size: 45,
-            color: Colors.white38,
-          ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           const Text(
             'No se encontraron cotizaciones',
             style: TextStyle(
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.bold,
             ),
           ),
-          const SizedBox(height: 5),
-          const Text(
-            'Prueba cambiando la búsqueda o el estado.',
-            style: TextStyle(
-              color: Colors.white54,
-            ),
-          ),
-          const SizedBox(height: 15),
+          const SizedBox(height: 14),
           TextButton.icon(
             onPressed: _clearFilters,
             icon: const Icon(
               Icons.filter_alt_off_outlined,
             ),
-            label: const Text(
-              'Limpiar filtros',
-            ),
+            label: const Text('Limpiar filtros'),
           ),
         ],
       ),

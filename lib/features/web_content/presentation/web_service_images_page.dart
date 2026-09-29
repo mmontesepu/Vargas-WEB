@@ -1,5 +1,4 @@
 import 'package:file_picker/file_picker.dart' as picker;
-
 import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_theme.dart';
@@ -68,7 +67,7 @@ class _WebServiceImagesPageState extends State<WebServiceImagesPage> {
   }
 
   Future<void> _changeImage(String serviceKey) async {
-    if (_savingKey != null) return;
+    if (_savingKey != null || _loading) return;
 
     try {
       final files = await picker.FilePicker.pickFiles(
@@ -111,7 +110,74 @@ class _WebServiceImagesPageState extends State<WebServiceImagesPage> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('No fue posible guardar la imagen: $error'),
+          content: Text(
+            'No fue posible guardar la imagen: $error',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _savingKey = null);
+      }
+    }
+  }
+
+  Future<void> _restoreDefault(String serviceKey) async {
+    if (_savingKey != null || _loading) return;
+
+    final title = _services[serviceKey] ?? serviceKey;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Restaurar imagen predeterminada'),
+        content: Text(
+          'La fotografía personalizada de $title dejará de '
+          'mostrarse y se utilizará nuevamente la imagen '
+          'referencial del sitio. ¿Deseas continuar?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: const Icon(Icons.restore),
+            label: const Text('Restaurar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _savingKey = serviceKey);
+
+    try {
+      await WebServiceImageRepository.restoreDefault(
+        serviceKey,
+      );
+
+      await _load();
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Se restauró la imagen predeterminada de $title.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'No fue posible restaurar la imagen: $error',
+          ),
         ),
       );
     } finally {
@@ -123,6 +189,9 @@ class _WebServiceImagesPageState extends State<WebServiceImagesPage> {
 
   Widget _serviceCard(String key, String title) {
     final url = _urls[key];
+    final hasCustomImage =
+        _paths[key] != null && _paths[key]!.trim().isNotEmpty;
+
     final busy = _savingKey == key;
 
     return Container(
@@ -139,11 +208,27 @@ class _WebServiceImagesPageState extends State<WebServiceImagesPage> {
           AspectRatio(
             aspectRatio: 16 / 10,
             child: url == null
-                ? const Center(
-                    child: Icon(
-                      Icons.image_outlined,
-                      color: gold,
-                      size: 52,
+                ? const ColoredBox(
+                    color: Color(0xFF27292B),
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.image_outlined,
+                            color: gold,
+                            size: 48,
+                          ),
+                          SizedBox(height: 10),
+                          Text(
+                            'Imagen referencial activa',
+                            style: TextStyle(
+                              color: Colors.white60,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   )
                 : Image.network(
@@ -172,30 +257,50 @@ class _WebServiceImagesPageState extends State<WebServiceImagesPage> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  _paths[key] == null
-                      ? 'Usando imagen referencial en la Home.'
-                      : 'Fotografía personalizada configurada.',
+                  hasCustomImage
+                      ? 'Fotografía personalizada configurada.'
+                      : 'Usando imagen referencial en la Home.',
                   style: const TextStyle(
                     color: Colors.white60,
                     fontSize: 12,
                   ),
                 ),
                 const SizedBox(height: 18),
-                FilledButton.icon(
-                  onPressed:
-                      _savingKey != null ? null : () => _changeImage(key),
-                  icon: busy
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                          ),
-                        )
-                      : const Icon(Icons.upload_outlined),
-                  label: Text(
-                    busy ? 'Guardando...' : 'Cambiar fotografía',
-                  ),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    FilledButton.icon(
+                      onPressed:
+                          _savingKey != null ? null : () => _changeImage(key),
+                      icon: busy
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Icon(
+                              Icons.upload_outlined,
+                            ),
+                      label: Text(
+                        busy ? 'Procesando...' : 'Cambiar fotografía',
+                      ),
+                    ),
+                    if (hasCustomImage)
+                      OutlinedButton.icon(
+                        onPressed: _savingKey != null
+                            ? null
+                            : () => _restoreDefault(key),
+                        icon: const Icon(
+                          Icons.restore_outlined,
+                        ),
+                        label: const Text(
+                          'Restaurar predeterminada',
+                        ),
+                      ),
+                  ],
                 ),
               ],
             ),
@@ -238,7 +343,9 @@ class _WebServiceImagesPageState extends State<WebServiceImagesPage> {
               ),
               const SizedBox(height: 26),
               if (_loading)
-                const Center(child: CircularProgressIndicator())
+                const Center(
+                  child: CircularProgressIndicator(),
+                )
               else if (_error != null)
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

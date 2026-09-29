@@ -26,8 +26,10 @@ class WebServiceImageRepository {
 
     for (final row in rows) {
       final key = row['service_key'] as String;
+
       if (result.containsKey(key)) {
-        result[key] = row['storage_path'] as String?;
+        final path = row['storage_path'] as String?;
+        result[key] = path == null || path.trim().isEmpty ? null : path;
       }
     }
 
@@ -89,12 +91,29 @@ class WebServiceImageRepository {
           .select('service_key')
           .single();
     } catch (_) {
-      // Si falla la actualización, retirar el archivo recién subido.
       try {
         await _db.storage.from(bucket).remove([path]);
       } catch (_) {}
 
       rethrow;
     }
+  }
+
+  /// Restaura la imagen referencial del servicio seleccionado.
+  /// No elimina físicamente la fotografía anterior del bucket.
+  static Future<void> restoreDefault(String serviceKey) async {
+    if (!serviceKeys.contains(serviceKey)) {
+      throw ArgumentError('Servicio no válido.');
+    }
+
+    await _db
+        .from('web_service_images')
+        .update({
+          'storage_path': null,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('service_key', serviceKey)
+        .select('service_key')
+        .single();
   }
 }
