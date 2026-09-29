@@ -15,8 +15,12 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
 
   Future<void> _showCreateUserDialog() async {
     final formKey = GlobalKey<FormState>();
+
     final nameController = TextEditingController();
     final emailController = TextEditingController();
+    final passwordController = TextEditingController();
+
+    bool showPassword = false;
 
     try {
       await showDialog<void>(
@@ -35,80 +39,137 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
                 ),
                 content: SizedBox(
                   width: 440,
-                  child: Form(
-                    key: formKey,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const Text(
-                          'La persona recibirá una invitación por correo '
-                          'para configurar su acceso al panel administrativo.',
-                          style: TextStyle(
-                            color: Colors.white60,
-                            fontSize: 13,
-                          ),
-                        ),
-                        const SizedBox(height: 22),
-                        TextFormField(
-                          controller: nameController,
-                          enabled: !_submitting,
-                          textCapitalization: TextCapitalization.words,
-                          decoration: const InputDecoration(
-                            labelText: 'Nombre completo',
-                            prefixIcon: Icon(Icons.person_outline),
-                          ),
-                          validator: (value) {
-                            final name = value?.trim() ?? '';
-                            if (name.length < 3) {
-                              return 'Ingresa el nombre completo';
-                            }
-                            if (name.length > 120) {
-                              return 'El nombre es demasiado largo';
-                            }
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        TextFormField(
-                          controller: emailController,
-                          enabled: !_submitting,
-                          keyboardType: TextInputType.emailAddress,
-                          decoration: const InputDecoration(
-                            labelText: 'Correo electrónico',
-                            prefixIcon: Icon(Icons.mail_outline),
-                          ),
-                          validator: (value) {
-                            final email = value?.trim() ?? '';
-                            if (!RegExp(
-                              r'^[^\s@]+@[^\s@]+\.[^\s@]+$',
-                            ).hasMatch(email)) {
-                              return 'Ingresa un correo válido';
-                            }
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        const Row(
-                          children: [
-                            Icon(
-                              Icons.verified_user_outlined,
-                              size: 18,
-                              color: gold,
+                  child: SingleChildScrollView(
+                    child: Form(
+                      key: formKey,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const Text(
+                            'Crea una cuenta con acceso completo '
+                            'al panel administrativo de Vargas SPA.',
+                            style: TextStyle(
+                              color: Colors.white60,
+                              fontSize: 13,
                             ),
-                            SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'Acceso completo a la administración',
-                                style: TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 12,
+                          ),
+                          const SizedBox(height: 22),
+
+                          // Nombre completo
+                          TextFormField(
+                            controller: nameController,
+                            enabled: !_submitting,
+                            textCapitalization: TextCapitalization.words,
+                            decoration: const InputDecoration(
+                              labelText: 'Nombre completo',
+                              prefixIcon: Icon(Icons.person_outline),
+                            ),
+                            validator: (value) {
+                              final name = value?.trim() ?? '';
+
+                              if (name.length < 3) {
+                                return 'Ingresa el nombre completo';
+                              }
+
+                              if (name.length > 120) {
+                                return 'El nombre es demasiado largo';
+                              }
+
+                              return null;
+                            },
+                          ),
+
+                          const SizedBox(height: 16),
+
+                          // Correo electrónico
+                          TextFormField(
+                            controller: emailController,
+                            enabled: !_submitting,
+                            keyboardType: TextInputType.emailAddress,
+                            autocorrect: false,
+                            decoration: const InputDecoration(
+                              labelText: 'Correo electrónico',
+                              prefixIcon: Icon(Icons.mail_outline),
+                            ),
+                            validator: (value) {
+                              final email = value?.trim() ?? '';
+
+                              if (email.length > 254 ||
+                                  !RegExp(
+                                    r'^[^\s@]+@[^\s@]+\.[^\s@]+$',
+                                  ).hasMatch(email)) {
+                                return 'Ingresa un correo válido';
+                              }
+
+                              return null;
+                            },
+                          ),
+
+                          const SizedBox(height: 16),
+
+                          // Contraseña temporal
+                          TextFormField(
+                            controller: passwordController,
+                            enabled: !_submitting,
+                            obscureText: !showPassword,
+                            autocorrect: false,
+                            enableSuggestions: false,
+                            decoration: InputDecoration(
+                              labelText: 'Contraseña temporal',
+                              prefixIcon: const Icon(Icons.lock_outline),
+                              helperText: 'Entre 12 y 128 caracteres',
+                              suffixIcon: IconButton(
+                                tooltip: showPassword
+                                    ? 'Ocultar contraseña'
+                                    : 'Mostrar contraseña',
+                                onPressed: () {
+                                  setDialogState(() {
+                                    showPassword = !showPassword;
+                                  });
+                                },
+                                icon: Icon(
+                                  showPassword
+                                      ? Icons.visibility_off_outlined
+                                      : Icons.visibility_outlined,
                                 ),
                               ),
                             ),
-                          ],
-                        ),
-                      ],
+                            validator: (value) {
+                              final password = value ?? '';
+
+                              if (password.length < 12 ||
+                                  password.length > 128) {
+                                return 'Usa entre 12 y 128 caracteres';
+                              }
+
+                              return null;
+                            },
+                          ),
+
+                          const SizedBox(height: 20),
+
+                          const Row(
+                            children: [
+                              Icon(
+                                Icons.verified_user_outlined,
+                                size: 18,
+                                color: gold,
+                              ),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Acceso completo a la administración',
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -122,9 +183,13 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
                     onPressed: _submitting
                         ? null
                         : () async {
-                            if (!formKey.currentState!.validate()) return;
+                            if (!formKey.currentState!.validate()) {
+                              return;
+                            }
 
-                            setDialogState(() => _submitting = true);
+                            setDialogState(() {
+                              _submitting = true;
+                            });
 
                             try {
                               final response = await Supabase
@@ -135,6 +200,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
                                   'name': nameController.text.trim(),
                                   'email':
                                       emailController.text.trim().toLowerCase(),
+                                  'password': passwordController.text,
                                 },
                               );
 
@@ -148,7 +214,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
                                     : null;
 
                                 throw Exception(
-                                  message ?? 'No se pudo enviar la invitación.',
+                                  message ?? 'No se pudo crear el usuario.',
                                 );
                               }
 
@@ -161,7 +227,8 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
                               ScaffoldMessenger.of(this.context).showSnackBar(
                                 const SnackBar(
                                   content: Text(
-                                    'Invitación enviada correctamente.',
+                                    'Usuario administrador creado '
+                                    'correctamente.',
                                   ),
                                 ),
                               );
@@ -191,9 +258,9 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
                               strokeWidth: 2,
                             ),
                           )
-                        : const Icon(Icons.send_outlined),
+                        : const Icon(Icons.person_add_alt_1),
                     label: Text(
-                      _submitting ? 'Enviando...' : 'Enviar invitación',
+                      _submitting ? 'Creando...' : 'Crear usuario',
                     ),
                   ),
                 ],
@@ -205,6 +272,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
     } finally {
       nameController.dispose();
       emailController.dispose();
+      passwordController.dispose();
     }
   }
 
@@ -238,7 +306,9 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
                       Text(
                         'Administra las personas autorizadas '
                         'para ingresar al panel.',
-                        style: TextStyle(color: Colors.white54),
+                        style: TextStyle(
+                          color: Colors.white54,
+                        ),
                       ),
                     ],
                   ),
@@ -276,7 +346,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
                     ),
                     SizedBox(height: 8),
                     Text(
-                      'Todos los usuarios invitados podrán acceder '
+                      'Los usuarios creados podrán acceder '
                       'a los módulos administrativos de Vargas SPA. '
                       'No se utilizan roles diferenciados.',
                       style: TextStyle(
